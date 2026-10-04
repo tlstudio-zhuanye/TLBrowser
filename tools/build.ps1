@@ -4,7 +4,8 @@
 # Params:
 #   -NoCompress   publish without single-file compression (bigger, faster start;
 #                 only useful for A/B comparison with tools/time_startup.py)
-param([switch]$NoCompress)
+#   -Desktop      also copy the fresh exe onto the Desktop
+param([switch]$NoCompress, [switch]$Desktop)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -18,6 +19,20 @@ if (-not (Test-Path $dotnet)) { $dotnet = "dotnet" }
 # The single-file publish writes dist\TLBrowser.exe in place, so any still-running
 # instance makes it fail with a confusing MSB4018 / "being used by another process".
 # Kill leftovers and wait until the file is actually writable before publishing.
+# Kill only instances that are actually running dist\TLBrowser.exe.
+# A copy the user put somewhere else (e.g. the Desktop test build) must NOT be
+# touched: a rebuild would otherwise yank the window out from under them while
+# they are testing it.
+function Stop-DistInstances {
+    Get-Process -Name TLBrowser -ErrorAction SilentlyContinue | ForEach-Object {
+        $p = $null
+        try { $p = $_.Path } catch { }
+        if ($p -and $p.StartsWith($out, [StringComparison]::OrdinalIgnoreCase)) {
+            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Wait-ExeUnlocked([string]$path, [int]$timeoutSec = 40) {
     $deadline = (Get-Date).AddSeconds($timeoutSec)
     while ((Get-Date) -lt $deadline) {
@@ -27,8 +42,7 @@ function Wait-ExeUnlocked([string]$path, [int]$timeoutSec = 40) {
             $fs.Close()
             return $true
         } catch {
-            Get-Process TLBrowser -ErrorAction SilentlyContinue |
-                Stop-Process -Force -ErrorAction SilentlyContinue
+            Stop-DistInstances
             Start-Sleep -Milliseconds 600
         }
     }
@@ -36,8 +50,7 @@ function Wait-ExeUnlocked([string]$path, [int]$timeoutSec = 40) {
 }
 
 $exe = Join-Path $out "TLBrowser.exe"
-Get-Process TLBrowser -ErrorAction SilentlyContinue |
-    Stop-Process -Force -ErrorAction SilentlyContinue
+Stop-DistInstances
 if (-not (Wait-ExeUnlocked $exe)) {
     "ERROR: $exe is still locked by another process; aborting." |
         Tee-Object -FilePath $log
@@ -70,15 +83,20 @@ if (Test-Path $exe) {
 Get-ChildItem -Path $out -Filter "*.xml" -ErrorAction SilentlyContinue |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
 
-# Sync the desktop copy so the desktop icon is always the latest build.
+# The Desktop copy is deliberately NOT refreshed by default.
+# The user keeps a build there to test by hand, so an automatic overwrite would
+# swap the file out from under them mid-test. Pass -Desktop to sync it on purpose
+# (or just copy dist\TLBrowser.exe over by hand).
 # The file name contains Chinese; build it from code points to keep this script
 # ASCII-only, because PowerShell 5.1 would garble a literal Chinese name.
 # 0x6D4F=liu 0x89C8=lan 0x5668=qi (the three Chinese chars of the app name)
-if ($rc -eq 0 -and (Test-Path $exe)) {
+if ($Desktop -and $rc -eq 0 -and (Test-Path $exe)) {
     $deskName = "TL " + [char]0x6D4F + [char]0x89C8 + [char]0x5668 + ".exe"
     $deskExe = Join-Path ([Environment]::GetFolderPath('Desktop')) $deskName
     Copy-Item -Path $exe -Destination $deskExe -Force -ErrorAction SilentlyContinue
     "DESKTOP_SYNC=$deskExe" | Add-Content -Path $log -Encoding UTF8
+} else {
+    "DESKTOP_SYNC=skipped (-Desktop not passed)" | Add-Content -Path $log -Encoding UTF8
 }
 
 exit $rc
