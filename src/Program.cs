@@ -17,6 +17,9 @@ internal static class Program
         if (args.Any(a => a.Equals("--selftest", StringComparison.OrdinalIgnoreCase)))
             return RunSelfTest();
 
+        // 界面语言要在任何窗口出现之前读，否则第一帧还是中文
+        Lang.LoadState();
+
         // 拦截规则和开关先读进来，网页一开就要用
         Safety.Load();
 
@@ -186,9 +189,8 @@ internal static class Program
         if (!string.IsNullOrEmpty(version)) return true;
 
         var answer = MessageBox.Show(
-            "缺少 WebView2 网页组件，TL 浏览器需要它才能显示网页。\n\n" +
-            "是否现在打开官方下载页？装完再打开本程序即可。",
-            Brand.AppName + " · 缺少网页组件",
+            Lang.T("boot.noRuntime"),
+            Lang.T("boot.noRuntimeTitle", Brand.AppName),
             MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
 
         if (answer == DialogResult.Yes)

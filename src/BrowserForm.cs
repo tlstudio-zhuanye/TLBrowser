@@ -77,14 +77,14 @@ internal sealed class BrowserForm : Form
     private bool _suggestArmed;
 
     private readonly AddressBar _addrBar = new();
-    private readonly IconButton _btnBack = new("\uE72B", "后退 (Alt+←)", 12f);
-    private readonly IconButton _btnForward = new("\uE72A", "前进 (Alt+→)", 12f);
-    private readonly IconButton _btnReload = new("\uE72C", "刷新 (F5)", 11.5f);
-    private readonly IconButton _btnHome = new("\uE80F", "新标签页 (Ctrl+T)", 11f);
-    private readonly IconButton _btnMenu = new("\uE712", "菜单", 11f);
+    private readonly IconButton _btnBack = new("\uE72B", Lang.T("tip.back"), 12f);
+    private readonly IconButton _btnForward = new("\uE72A", Lang.T("tip.forward"), 12f);
+    private readonly IconButton _btnReload = new("\uE72C", Lang.T("tip.reload"), 11.5f);
+    private readonly IconButton _btnHome = new("\uE80F", Lang.T("tip.home"), 11f);
+    private readonly IconButton _btnMenu = new("\uE712", Lang.T("tip.menu"), 11f);
     private readonly PillButton _btnTl = new("tlstudio.cn", Brand.Blue, true);
     private readonly PillButton _btnDoubler = new("tldoublerstudio.cn", Brand.Purple, true);
-    private readonly PillButton _btnDual = new("双站对照", Brand.Blue, false);
+    private readonly PillButton _btnDual = new(Lang.T("tab.dualTitle"), Brand.Blue, false);
 
     private readonly List<WebTab> _tabs = new();
     private WebTab? _current;
@@ -107,6 +107,10 @@ internal sealed class BrowserForm : Form
         _startUrl = startUrl;
         _startDual = startDual;
         _openGuard = openGuard;
+
+        // 语言要在搭界面之前读，否则第一次画出来的菜单还是中文
+        Lang.LoadState();
+
         Text = Brand.AppName;
         BackColor = Brand.ChromeBg;
         MinimumSize = new Size(1040, 640);
@@ -272,8 +276,7 @@ internal sealed class BrowserForm : Form
         catch (Exception ex)
         {
             MessageBox.Show(this,
-                "网页组件初始化失败：\n\n" + ex.Message +
-                "\n\n请先安装 WebView2 网页组件后重试。",
+                Lang.T("common.webviewMissing", ex.Message),
                 Brand.AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
             Close();
             return;
@@ -285,8 +288,8 @@ internal sealed class BrowserForm : Form
         }
         catch (Exception ex)
         {
-            _statusText.Text = "标签页初始化失败：" + ex.Message;
-            MessageBox.Show(this, "标签页初始化失败：\n\n" + ex.Message, Brand.AppName,
+            _statusText.Text = Lang.T("status.initFailed", ex.Message);
+            MessageBox.Show(this, Lang.T("common.tabInitFailed", ex.Message), Brand.AppName,
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         LayoutChrome();
@@ -307,6 +310,7 @@ internal sealed class BrowserForm : Form
         tab.Dock = DockStyle.Fill;
         tab.Visible = false;
         tab.KeyRouter = RouteKey;
+        tab.TranslateRequested = OnTranslateRequested;
         tab.Changed += OnTabChanged;
         tab.NewTabRequested += (sender, uri) => { _ = OpenTabAsync(uri); };
 
@@ -445,18 +449,18 @@ internal sealed class BrowserForm : Form
 
         var lines = new List<string>
         {
-            "首页与搜索引擎写在程序里，外部程序改不动。"
+            Lang.T("shield.hardcoded")
         };
         lines.Add(handled > 0
-            ? $"本次启动已自动拦下并还原 {handled} 项对首页/搜索的改动。"
-            : "本次启动没有发现任何改动尝试。");
+            ? Lang.T("shield.handled", handled)
+            : Lang.T("shield.none"));
         if (attention > 0)
-            lines.Add($"系统层面有 {attention} 项需要注意（IE 主页 / 启动项 / 360 残留等）。");
+            lines.Add(Lang.T("shield.attention", attention));
         lines.Add(Safety.AdBlock
-            ? $"广告与跟踪拦截已开启，本次拦下 {Safety.BlockedTotal} 条。"
-            : "广告与跟踪拦截当前是关闭的。");
-        lines.Add("点击查看完整守护面板。");
-        _shield.Tip = "主页守护：" + string.Join("\n", lines);
+            ? Lang.T("shield.adOn", Safety.BlockedTotal)
+            : Lang.T("shield.adOff"));
+        lines.Add(Lang.T("shield.more"));
+        _shield.Tip = Lang.T("shield.title") + string.Join("\n", lines);
 
         UpdateBlockLabel();
     }
@@ -474,8 +478,8 @@ internal sealed class BrowserForm : Form
             return;
         }
 
-        var text = $"已拦 {n} 条广告";
-        if (Safety.PopupBlocked > 0) text += $" · 弹窗 {Safety.PopupBlocked}";
+        var text = Lang.T("status.blocked", n);
+        if (Safety.PopupBlocked > 0) text += Lang.T("status.popups", Safety.PopupBlocked);
 
         if (_blockLabel.Text == text) return;
         _blockLabel.Text = text;
@@ -488,28 +492,28 @@ internal sealed class BrowserForm : Form
         var denied = Safety.RecentDenied(20);
 
         var sb = new StringBuilder();
-        sb.AppendLine($"本次启动以来：拦下 {Safety.BlockedTotal} 条广告/跟踪请求，" +
-                      $"拦下弹窗 {Safety.PopupBlocked} 个，");
-        sb.AppendLine($"拒绝权限请求 {Safety.DeniedTotal} 次，外部调用询问 {Safety.ExternalAsked} 次。");
-        sb.AppendLine($"内置规则 {Safety.RuleCount} 条，拦截开关：{(Safety.AdBlock ? "开" : "关")}。");
+        sb.AppendLine(Lang.T("report.sum1", Safety.BlockedTotal, Safety.PopupBlocked));
+        sb.AppendLine(Lang.T("report.sum2", Safety.DeniedTotal, Safety.ExternalAsked));
+        sb.AppendLine(Lang.T("report.sum3", Safety.RuleCount,
+            Safety.AdBlock ? Lang.T("report.on") : Lang.T("report.off")));
         sb.AppendLine();
 
-        sb.AppendLine("—— 最近拦下的（最多 30 条）——");
-        if (blocked.Count == 0) sb.AppendLine("  （这次还没有拦到东西）");
+        sb.AppendLine(Lang.T("report.recent"));
+        if (blocked.Count == 0) sb.AppendLine(Lang.T("report.recentEmpty"));
         foreach (var b in blocked) sb.AppendLine("  " + b);
 
         if (denied.Count > 0)
         {
             sb.AppendLine();
-            sb.AppendLine("—— 被拒绝的权限请求 ——");
+            sb.AppendLine(Lang.T("report.denied"));
             foreach (var d in denied) sb.AppendLine("  " + d);
         }
 
         sb.AppendLine();
-        sb.AppendLine("被误拦的站点可以写进这个文件放行（前缀 +），改完重启生效：");
+        sb.AppendLine(Lang.T("report.allowHint"));
         sb.AppendLine(Safety.UserRulesPath);
 
-        MessageBox.Show(this, sb.ToString(), Brand.AppName + " · 拦截记录",
+        MessageBox.Show(this, sb.ToString(), Lang.T("common.adblockLogTitle", Brand.AppName),
             MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
@@ -539,7 +543,7 @@ internal sealed class BrowserForm : Form
         // WebView2 的下载进度事件可能从别的线程来，Label 只能在 UI 线程动
         if (InvokeRequired) { try { BeginInvoke(UpdateDownloadLabel); } catch { } return; }
         var n = DownloadStore.ActiveCount;
-        _dlLabel.Text = n > 0 ? $"下载中 {n} 项" : "";
+        _dlLabel.Text = n > 0 ? Lang.T("status.downloading", n) : "";
     }
 
     // ────────────────────────────── 更新检查 ──────────────────────────────
@@ -550,12 +554,12 @@ internal sealed class BrowserForm : Form
     /// </summary>
     private async void CheckForUpdates(bool manual)
     {
-        if (manual) _statusText.Text = "正在检查更新…";
+        if (manual) _statusText.Text = Lang.T("status.checking");
 
         var info = await UpdateCheck.CheckAsync();
         if (info is null)
         {
-            if (manual) _statusText.Text = "检查更新失败（网络不可用），请稍后再试。";
+            if (manual) _statusText.Text = Lang.T("status.checkFailed");
             return;
         }
 
@@ -563,12 +567,12 @@ internal sealed class BrowserForm : Form
         {
             _updateLabel.Text = "";
             _updateInfo = null;
-            if (manual) _statusText.Text = $"已是最新版本（v{Brand.AppVersion}）。";
+            if (manual) _statusText.Text = Lang.T("status.upToDate", Brand.AppVersion);
             return;
         }
 
         _updateInfo = info;
-        _updateLabel.Text = $"有新版本 v{info.LatestVersion}";
+        _updateLabel.Text = Lang.T("status.newVersion", info.LatestVersion);
 
         // 有新版就弹公告（用户要求每次启动都提示）
         ShowUpdateDialog(info);
@@ -584,8 +588,8 @@ internal sealed class BrowserForm : Form
     /// <summary>菜单里那一行。有新版时直接显示版本号，让人一眼能看到。</summary>
     private string UpdateMenuText() =>
         _updateInfo is { HasUpdate: true }
-            ? $"有新版本 v{_updateInfo.LatestVersion}，点此下载"
-            : "检查更新";
+            ? Lang.T("menu.hasUpdate", _updateInfo.LatestVersion)
+            : Lang.T("menu.checkUpdate");
 
     private void UpdateMenuAction()
     {
@@ -595,11 +599,11 @@ internal sealed class BrowserForm : Form
 
     private void ShowUpdateDialog(UpdateInfo info)
     {
-        var msg = $"发现新版本 v{info.LatestVersion}（当前 v{Brand.AppVersion}）。\n\n";
+        var msg = Lang.T("update.foundBody", info.LatestVersion, Brand.AppVersion) + "\n\n";
         if (!string.IsNullOrWhiteSpace(info.Notes)) msg += info.Notes + "\n\n";
-        msg += "是否现在打开下载页？";
+        msg += Lang.T("update.openAsk");
 
-        var answer = MessageBox.Show(this, msg, Brand.AppName + " · 发现新版本",
+        var answer = MessageBox.Show(this, msg, Lang.T("update.foundTitle", Brand.AppName),
             MessageBoxButtons.YesNo, MessageBoxIcon.Information);
         if (answer == DialogResult.Yes) OpenUpdateUrl(info);
     }
@@ -738,7 +742,7 @@ internal sealed class BrowserForm : Form
                 {
                     Kind = SuggestKind.Brand,
                     Text = host,
-                    Hint = "官网",
+                    Hint = Lang.T("sug.brand"),
                     Value = "https://" + host
                 });
 
@@ -759,7 +763,7 @@ internal sealed class BrowserForm : Form
             {
                 Kind = SuggestKind.Navigate,
                 Text = q,
-                Hint = "直接访问",
+                Hint = Lang.T("sug.navigate"),
                 Value = Brand.NormalizeInput(q)
             });
 
@@ -771,7 +775,7 @@ internal sealed class BrowserForm : Form
             {
                 Kind = SuggestKind.Brand,
                 Text = host,
-                Hint = "官网",
+                Hint = Lang.T("sug.brand"),
                 Value = "https://" + host
             });
         }
@@ -789,7 +793,7 @@ internal sealed class BrowserForm : Form
         {
             Kind = SuggestKind.Search,
             Text = q,
-            Hint = "搜索",
+            Hint = Lang.T("sug.search"),
             Value = Brand.SearchTemplate + Uri.EscapeDataString(q)
         });
 
@@ -903,34 +907,37 @@ internal sealed class BrowserForm : Form
     {
         var menu = new ContextMenuStrip { Font = new Font("Microsoft YaHei UI", 9f) };
 
-        menu.Items.Add(Menu("新建标签页", "Ctrl+T", () => _ = OpenTabAsync(null)));
-        menu.Items.Add(Menu("双站对照（并排看两个官网）", "Ctrl+Shift+D", OpenDualTab));
+        menu.Items.Add(Menu(Lang.T("menu.newTab"), "Ctrl+T", () => _ = OpenTabAsync(null)));
+        menu.Items.Add(Menu(Lang.T("menu.dual"), "Ctrl+Shift+D", OpenDualTab));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Menu("打开 tlstudio.cn", "Ctrl+1", () => OpenSite(Brand.SiteTl)));
-        menu.Items.Add(Menu("打开 tldoublerstudio.cn", "Ctrl+2", () => OpenSite(Brand.SiteDoubler)));
+        menu.Items.Add(Menu(Lang.T("menu.openTl"), "Ctrl+1", () => OpenSite(Brand.SiteTl)));
+        menu.Items.Add(Menu(Lang.T("menu.openDoubler"), "Ctrl+2", () => OpenSite(Brand.SiteDoubler)));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Menu("恢复刚关闭的标签页", "Ctrl+Shift+T", ReopenClosedTab));
+        menu.Items.Add(Menu(Lang.T("menu.reopen"), "Ctrl+Shift+T", ReopenClosedTab));
         menu.Items.Add(Menu(DownloadsMenuText(), "Ctrl+J", ShowDownloads));
         menu.Items.Add(BuildBookmarkMenu());
-        menu.Items.Add(Menu(_current?.IsMuted == true ? "取消静音此标签" : "静音此标签",
+        menu.Items.Add(Menu(_current?.IsMuted == true ? Lang.T("menu.unmute") : Lang.T("menu.mute"),
             null, () => _current?.ToggleMute()));
         menu.Items.Add(AdBlockMenuItem());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Menu("复制当前网址", "Ctrl+Shift+C", CopyUrl));
-        menu.Items.Add(Menu("在系统默认浏览器中打开", null, OpenInDefaultBrowser));
-        menu.Items.Add(Menu("清除浏览记录（" + HistoryStore.Count + " 条）", null, ClearHistory));
+        menu.Items.Add(Menu(Lang.T("menu.translatePage"), null, TranslateCurrentPage));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Menu("放大", "Ctrl++", () => ZoomBy(+0.1)));
-        menu.Items.Add(Menu("缩小", "Ctrl+-", () => ZoomBy(-0.1)));
-        menu.Items.Add(Menu("重置缩放", "Ctrl+0", () => _current?.ResetZoom()));
+        menu.Items.Add(Menu(Lang.T("menu.copyUrl"), "Ctrl+Shift+C", CopyUrl));
+        menu.Items.Add(Menu(Lang.T("menu.openInSystem"), null, OpenInDefaultBrowser));
+        menu.Items.Add(Menu(Lang.T("menu.clearHistory", HistoryStore.Count), null, ClearHistory));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Menu("开发者工具", "F12", () => _current?.OpenDevTools()));
+        menu.Items.Add(Menu(Lang.T("menu.zoomIn"), "Ctrl++", () => ZoomBy(+0.1)));
+        menu.Items.Add(Menu(Lang.T("menu.zoomOut"), "Ctrl+-", () => ZoomBy(-0.1)));
+        menu.Items.Add(Menu(Lang.T("menu.zoomReset"), "Ctrl+0", () => _current?.ResetZoom()));
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(Menu(Lang.T("menu.devTools"), "F12", () => _current?.OpenDevTools()));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(BuildLanguageMenu());
         menu.Items.Add(Menu(GuardMenuText(), null, ShowGuard));
         menu.Items.Add(Menu(UpdateMenuText(), null, UpdateMenuAction));
-        menu.Items.Add(Menu("关于 TL 浏览器", null, ShowAbout));
+        menu.Items.Add(Menu(Lang.T("menu.about"), null, ShowAbout));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Menu("退出", null, Close));
+        menu.Items.Add(Menu(Lang.T("menu.exit"), null, Close));
 
         menu.Show(_btnMenu, new Point(0, _btnMenu.Height + 2));
     }
@@ -938,16 +945,16 @@ internal sealed class BrowserForm : Form
     private static string GuardMenuText()
     {
         var handled = HomeGuard.HandledCount;
-        if (handled > 0) return $"主页守护（已拦下 {handled} 项）";
+        if (handled > 0) return Lang.T("menu.guardBlocked", handled);
 
         var attention = HomeGuard.AttentionCount;
-        return attention > 0 ? $"主页守护（{attention} 项待看）" : "主页守护";
+        return attention > 0 ? Lang.T("menu.guardAttention", attention) : Lang.T("menu.guard");
     }
 
     private static string DownloadsMenuText()
     {
         var n = DownloadStore.ActiveCount;
-        return n > 0 ? $"下载（进行中 {n} 项）" : "下载";
+        return n > 0 ? Lang.T("menu.downloadsActive", n) : Lang.T("menu.downloads");
     }
 
     private static ToolStripMenuItem Menu(string text, string? shortcut, Action action)
@@ -966,8 +973,8 @@ internal sealed class BrowserForm : Form
     {
         var item = new ToolStripMenuItem(
             Safety.AdBlock
-                ? $"广告与跟踪拦截：已开启（已拦 {Safety.BlockedTotal} 条）"
-                : "广告与跟踪拦截：已关闭")
+                ? Lang.T("adblock.on", Safety.BlockedTotal)
+                : Lang.T("adblock.off"))
         {
             Checked = Safety.AdBlock
         };
@@ -975,18 +982,18 @@ internal sealed class BrowserForm : Form
         {
             Safety.AdBlock = !Safety.AdBlock;
             UpdateShield();
-            _statusText.Text = Safety.AdBlock ? "广告与跟踪拦截已开启。" : "广告与跟踪拦截已关闭。";
+            _statusText.Text = Safety.AdBlock ? Lang.T("adblock.statusOn") : Lang.T("adblock.statusOff");
         };
         return item;
     }
 
     private ToolStripMenuItem BuildBookmarkMenu()
     {
-        var root = new ToolStripMenuItem("书签");
+        var root = new ToolStripMenuItem(Lang.T("menu.bookmarks"));
         var url = _current?.CurrentUrl ?? "";
         var marked = Bookmarks.Contains(url);
 
-        root.DropDownItems.Add(Menu(marked ? "取消收藏此页" : "收藏此页", "Ctrl+D", ToggleBookmark));
+        root.DropDownItems.Add(Menu(marked ? Lang.T("bm.remove") : Lang.T("bm.add"), "Ctrl+D", ToggleBookmark));
 
         var list = Bookmarks.All();
         if (list.Count > 0)
@@ -1006,6 +1013,74 @@ internal sealed class BrowserForm : Form
         return root;
     }
 
+    // ────────────────────────────── 翻译 ──────────────────────────────
+
+    /// <summary>翻译目标语言：界面英文时翻成英文，否则翻成中文。</summary>
+    private static string TranslateTo => Lang.IsEn ? "en" : "zh-Hans";
+
+    /// <summary>
+    /// 整页翻译。走 Bing 网页翻译：国内可直连、不需要 API key，
+    /// 也不用自己解析 DOM（那才是真的维护噩梦）。
+    /// </summary>
+    private void TranslateCurrentPage() => TranslatePage(_current?.CurrentUrl);
+
+    private void TranslatePage(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        if (url!.StartsWith("file:", StringComparison.OrdinalIgnoreCase) ||
+            url.StartsWith("about:", StringComparison.OrdinalIgnoreCase)) return;
+
+        _ = OpenTabAsync("https://www.bing.com/translator?to=" + TranslateTo +
+                         "&a=" + Uri.EscapeDataString(url));
+    }
+
+    /// <summary>划词翻译：把选中的文字丢给 Bing 翻译。</summary>
+    internal void TranslateSelection(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        var t = text!.Trim();
+        if (t.Length > 500) t = t[..500];
+
+        _ = OpenTabAsync("https://www.bing.com/translator?to=" + TranslateTo +
+                         "&text=" + Uri.EscapeDataString(t));
+    }
+
+    /// <summary>
+    /// 网页右键菜单点翻译时的入口。选中文字非空 → 划词翻译；否则翻整页。
+    /// 用右键里带过来的页面地址，不用「当前标签」的地址——双站对照时两者可能不是同一个。
+    /// </summary>
+    private void OnTranslateRequested(string? selectedText, string? pageUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(selectedText)) TranslateSelection(selectedText);
+        else TranslatePage(pageUrl);
+
+        _statusText.Text = Lang.T("status.translating");
+    }
+
+    // ────────────────────────────── 界面语言 ──────────────────────────────
+
+    private ToolStripMenuItem BuildLanguageMenu()
+    {
+        var root = new ToolStripMenuItem(Lang.T("menu.language"));
+        // 语言名永远显示它自己，不做翻译，否则英文界面下会变成看不懂的方块
+        var zh = new ToolStripMenuItem("简体中文") { Checked = !Lang.IsEn };
+        zh.Click += (_, _) => SwitchLanguage(Lang.ZH);
+        var en = new ToolStripMenuItem("English") { Checked = Lang.IsEn };
+        en.Click += (_, _) => SwitchLanguage(Lang.EN);
+        root.DropDownItems.Add(zh);
+        root.DropDownItems.Add(en);
+        return root;
+    }
+
+    /// <summary>切换语言。菜单是每次动态构建的，下次打开即生效；状态条当场刷新。</summary>
+    private void SwitchLanguage(string lang)
+    {
+        if (string.Equals(lang, Lang.EN, StringComparison.OrdinalIgnoreCase) == Lang.IsEn) return;
+        var name = Lang.SetLanguage(lang);
+        UpdateShield();
+        _statusText.Text = Lang.T("common.languageSwitched", name);
+    }
+
     private void ToggleBookmark()
     {
         var tab = _current;
@@ -1015,12 +1090,12 @@ internal sealed class BrowserForm : Form
         if (string.IsNullOrEmpty(url) ||
             url.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
         {
-            _statusText.Text = "本地新标签页不用收藏。";
+            _statusText.Text = Lang.T("bm.localSkip");
             return;
         }
 
         var added = Bookmarks.Toggle(url, tab.Title);
-        _statusText.Text = added ? "已收藏：" + tab.Title : "已取消收藏：" + tab.Title;
+        _statusText.Text = added ? Lang.T("bm.added", tab.Title) : Lang.T("bm.removed", tab.Title);
     }
 
     /// <summary>Ctrl+Shift+T：把刚关掉的那个标签原样开回来。</summary>
@@ -1028,7 +1103,7 @@ internal sealed class BrowserForm : Form
     {
         if (_closedTabs.Count == 0)
         {
-            _statusText.Text = "没有刚关闭的标签页可以恢复。";
+            _statusText.Text = Lang.T("status.noClosedTab");
             return;
         }
 
@@ -1040,33 +1115,33 @@ internal sealed class BrowserForm : Form
     private void ShowTabContextMenu(WebTab tab)
     {
         var menu = new ContextMenuStrip { Font = new Font("Microsoft YaHei UI", 9f) };
-        menu.Items.Add(Menu("刷新", "F5", () =>
+        menu.Items.Add(Menu(Lang.T("tab.refresh"), "F5", () =>
         {
             SelectTab(tab, false);
             tab.ReloadOrStop();
         }));
-        menu.Items.Add(Menu("复制网址", null, () =>
+        menu.Items.Add(Menu(Lang.T("menu.copyUrl"), null, () =>
         {
             try { Clipboard.SetText(tab.CurrentUrl); } catch { }
         }));
-        menu.Items.Add(Menu(tab.IsMuted ? "取消静音" : "静音此标签", null, () =>
+        menu.Items.Add(Menu(tab.IsMuted ? Lang.T("menu.unmute") : Lang.T("menu.mute"), null, () =>
         {
             SelectTab(tab, false);
             tab.ToggleMute();
         }));
-        menu.Items.Add(Menu(Bookmarks.Contains(tab.CurrentUrl) ? "取消收藏" : "收藏此标签", null, () =>
+        menu.Items.Add(Menu(Bookmarks.Contains(tab.CurrentUrl) ? Lang.T("bm.removeTab") : Lang.T("bm.addTab"), null, () =>
         {
             SelectTab(tab, false);
             ToggleBookmark();
         }));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add(Menu("关闭标签页", "Ctrl+W", () => CloseTab(tab)));
-        menu.Items.Add(Menu("关闭其他标签页", null, () => CloseOtherTabs(tab)));
-        menu.Items.Add(Menu("关闭右侧标签页", null, () => CloseTabsToRight(tab)));
+        menu.Items.Add(Menu(Lang.T("tab.close"), "Ctrl+W", () => CloseTab(tab)));
+        menu.Items.Add(Menu(Lang.T("tab.closeOthers"), null, () => CloseOtherTabs(tab)));
+        menu.Items.Add(Menu(Lang.T("tab.closeRight"), null, () => CloseTabsToRight(tab)));
         if (tab is DualTab dual)
         {
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(Menu("左右互换", null, dual.SwapSides));
+            menu.Items.Add(Menu(Lang.T("dual.swap"), null, dual.SwapSides));
         }
         menu.Show(Cursor.Position);
     }
@@ -1099,9 +1174,8 @@ internal sealed class BrowserForm : Form
         if (n == 0) return;
 
         var answer = MessageBox.Show(this,
-            $"确定清除本浏览器的全部浏览记录吗？\n\n共 {n} 条。\n" +
-            "只会删除本程序自己记录的历史，不影响其他浏览器。",
-            Brand.AppName + " · 清除浏览记录",
+            Lang.T("common.clearHistoryAsk", n),
+            Lang.T("common.clearHistoryTitle", Brand.AppName),
             MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
         if (answer != DialogResult.Yes) return;
 

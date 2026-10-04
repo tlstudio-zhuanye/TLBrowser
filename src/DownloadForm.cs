@@ -20,10 +20,13 @@ internal sealed class DownloadForm : Form
     };
 
     private readonly ListView _lvActive = MakeList(
-        ("文件名", 300), ("大小", 92), ("进度", 120), ("来源", 158));
+        (Lang.T("dl.col.file"), 300), (Lang.T("dl.col.size"), 92),
+        (Lang.T("dl.col.progress"), 120), (Lang.T("dl.col.source"), 158));
 
     private readonly ListView _lvHistory = MakeList(
-        ("文件名", 300), ("状态", 72), ("大小", 84), ("时间", 130), ("来源", 84));
+        (Lang.T("dl.col.file"), 300), (Lang.T("dl.col.status"), 72),
+        (Lang.T("dl.col.size"), 84), (Lang.T("dl.col.time"), 130),
+        (Lang.T("dl.col.source"), 84));
 
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 250 };
     private bool _dirty = true;
@@ -97,7 +100,7 @@ internal sealed class DownloadForm : Form
         var title = new Label
         {
             AutoSize = false,
-            Text = "下载",
+            Text = Lang.T("dl.title"),
             Font = new Font("Microsoft YaHei UI", 14f, FontStyle.Bold),
             ForeColor = Brand.TextMain,
             BackColor = Color.Transparent,
@@ -152,22 +155,22 @@ internal sealed class DownloadForm : Form
             e.Graphics.DrawLine(pen, 0, 0, panel.Width, 0);
         };
 
-        var openFile = new PillButton("打开文件", Brand.Blue, true);
+        var openFile = new PillButton(Lang.T("dl.openFile"), Brand.Blue, true);
         openFile.Click += (_, _) => OpenSelectedFile();
 
-        var openFolder = new PillButton("打开所在文件夹", Brand.Blue, false);
+        var openFolder = new PillButton(Lang.T("dl.openFolder"), Brand.Blue, false);
         openFolder.Click += (_, _) => OpenSelectedFolder();
 
-        var cancel = new PillButton("取消选中", Brand.Purple, false);
+        var cancel = new PillButton(Lang.T("dl.cancelSel"), Brand.Purple, false);
         cancel.Click += (_, _) => CancelSelected();
 
-        var remove = new PillButton("删除记录", Brand.Purple, false);
+        var remove = new PillButton(Lang.T("dl.delete"), Brand.Purple, false);
         remove.Click += (_, _) => RemoveSelected();
 
-        var clear = new PillButton("清空记录", Brand.Purple, false);
+        var clear = new PillButton(Lang.T("dl.clear"), Brand.Purple, false);
         clear.Click += (_, _) => ClearHistory();
 
-        var close = new PillButton("关闭", Brand.Blue, false);
+        var close = new PillButton(Lang.T("dl.close"), Brand.Blue, false);
         close.Click += (_, _) => Close();
 
         panel.Controls.Add(openFile);
@@ -182,7 +185,7 @@ internal sealed class DownloadForm : Form
             const int y = 13, h = 32;
             var x = 18;
             foreach (var (b, w) in new[] {
-                (openFile, 88), (openFolder, 126), (cancel, 92), (remove, 92), (clear, 92)
+                (openFile, 96), (openFolder, 132), (cancel, 120), (remove, 96), (clear, 96)
             })
             {
                 b.SetBounds(x, y, w, h);
@@ -255,7 +258,7 @@ internal sealed class DownloadForm : Form
         foreach (var d in list) _lvHistory.Items.Add(HistoryRow(d));
         if (_lvHistory.Items.Count == 0)
         {
-            var idle = new ListViewItem(new[] { "还没有下载记录", "—", "—", "—", "—" });
+            var idle = new ListViewItem(new[] { Lang.T("dl.idleHistory"), "—", "—", "—", "—" });
             idle.ForeColor = Brand.TextDim;
             _lvHistory.Items.Add(idle);
         }
@@ -311,7 +314,7 @@ internal sealed class DownloadForm : Form
 
     private static string ProgressText(ActiveDownload d)
     {
-        if (d.Percent < 0) return $"{FormatSize(d.BytesReceived)} 已下载";
+        if (d.Percent < 0) return Lang.T("dl.progressUnknown", FormatSize(d.BytesReceived));
         return $"{d.Percent}% · {FormatSize(d.BytesReceived)} / {FormatSize(d.TotalBytes)}";
     }
 
@@ -349,12 +352,12 @@ internal sealed class DownloadForm : Form
         var d = SelectedHistory();
         if (d is null)
         {
-            MessageBox.Show(this, "先在「下载记录」里选中一条。", Brand.AppName,
+            MessageBox.Show(this, Lang.T("dl.pickHistory"), Brand.AppName,
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
         if (!DownloadStore.OpenFile(d))
-            MessageBox.Show(this, "文件不存在，可能已被移动或删除。\n\n" + d.FilePath, Brand.AppName,
+            MessageBox.Show(this, Lang.T("dl.missingFile", d.FilePath), Brand.AppName,
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
@@ -363,7 +366,7 @@ internal sealed class DownloadForm : Form
         var d = SelectedHistory();
         if (d is null)
         {
-            MessageBox.Show(this, "先在「下载记录」里选中一条。", Brand.AppName,
+            MessageBox.Show(this, Lang.T("dl.pickHistory"), Brand.AppName,
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -375,7 +378,7 @@ internal sealed class DownloadForm : Form
         var d = SelectedActive();
         if (d is null)
         {
-            MessageBox.Show(this, "先在「正在下载」里选中一条进行中的下载。", Brand.AppName,
+            MessageBox.Show(this, Lang.T("dl.pickActive"), Brand.AppName,
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -387,7 +390,7 @@ internal sealed class DownloadForm : Form
         var d = SelectedHistory();
         if (d is null)
         {
-            MessageBox.Show(this, "先在「下载记录」里选中一条。", Brand.AppName,
+            MessageBox.Show(this, Lang.T("dl.pickHistory"), Brand.AppName,
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -398,8 +401,8 @@ internal sealed class DownloadForm : Form
     {
         if (DownloadStore.HistoryCount == 0) return;
         var answer = MessageBox.Show(this,
-            "确定清空全部下载记录吗？\n\n只会删除记录列表，已经下好的文件不会被删。",
-            Brand.AppName + " · 清空下载记录",
+            Lang.T("dl.clearAsk"),
+            Lang.T("dl.clearTitle", Brand.AppName),
             MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
         if (answer != DialogResult.Yes) return;
         DownloadStore.Clear();

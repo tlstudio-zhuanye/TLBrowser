@@ -6,7 +6,7 @@ internal sealed class AboutForm : Form
 {
     public AboutForm()
     {
-        Text = "关于 " + Brand.AppName;
+        Text = Lang.T("about.title", Brand.AppName);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MaximizeBox = false;
@@ -51,13 +51,13 @@ internal sealed class AboutForm : Form
         var note = new Label
         {
             Bounds = new Rectangle(28, 124, 374, 42),
-            Text = "两个官网，一个窗口。\n缓存与登录数据只保存在本机，不上传任何信息。",
+            Text = Lang.T("about.note"),
             ForeColor = Brand.TextDim
         };
 
         var ok = new Button
         {
-            Text = "确定",
+            Text = Lang.T("common.ok"),
             Bounds = new Rectangle(318, 256, 84, 32),
             FlatStyle = FlatStyle.System,
             DialogResult = DialogResult.OK

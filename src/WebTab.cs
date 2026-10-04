@@ -30,7 +30,7 @@ internal abstract class WebTab : UserControl
         0x44, 0x01, 0x00, 0x3B
     };
 
-    public string Title { get; protected set; } = "新标签页";
+    public string Title { get; protected set; } = Lang.T("tab.newTitle");
     public Image? Favicon { get; protected set; }
     public bool IsLoading { get; private set; }
     public bool CanGoBack { get; private set; }
@@ -50,6 +50,12 @@ internal abstract class WebTab : UserControl
 
     /// <summary>把在网页里按下的键交给主窗口处理；返回 true 表示已处理并拦截。</summary>
     public Func<uint, bool>? KeyRouter;
+
+    /// <summary>
+    /// 网页右键菜单里点了翻译。参数一 = 选中的文字（null 表示没有选中，要翻整页），
+    /// 参数二 = 当前页面地址。交给主窗口去开翻译标签，标签自己不认得主窗口。
+    /// </summary>
+    public Action<string?, string?>? TranslateRequested;
 
     protected void RaiseChanged() => Changed?.Invoke(this);
 
@@ -196,7 +202,7 @@ internal abstract class WebTab : UserControl
             RecalcLoading();
             Address = e.Uri;
             IsHomePage = IsHomePageUrl(e.Uri);
-            StatusText = "正在打开 " + SafeHost(e.Uri);
+            StatusText = Lang.T("tab.opening", SafeHost(e.Uri));
             RaiseChanged();
         };
 
@@ -218,7 +224,7 @@ internal abstract class WebTab : UserControl
                 IsHomePage = IsHomePageUrl(core.Source);
                 CanGoBack = core.CanGoBack;
                 CanGoForward = core.CanGoForward;
-                StatusText = e.IsSuccess ? "" : "加载失败：" + e.WebErrorStatus;
+                StatusText = e.IsSuccess ? "" : Lang.T("tab.loadFailed", e.WebErrorStatus);
             }
             if (!IsDual) Title = CleanTitle(core.DocumentTitle);
 
@@ -294,7 +300,7 @@ internal abstract class WebTab : UserControl
         {
             _loading.Remove(view);
             RecalcLoading();
-            StatusText = "页面进程异常（" + e.ProcessFailedKind + "），按 F5 可重试";
+            StatusText = Lang.T("tab.crashed", e.ProcessFailedKind);
             RaiseChanged();
         };
 
@@ -320,9 +326,56 @@ internal abstract class WebTab : UserControl
         // 点进哪一侧，就把哪一侧当“当前侧”（双站对照时决定地址栏跟谁走）
         view.GotFocus += (_, _) => MarkActive(view);
         view.Enter += (_, _) => MarkActive(view);
-        core.ContextMenuRequested += (_, _) => MarkActive(view);
+        core.ContextMenuRequested += (_, e) =>
+        {
+            MarkActive(view);
+            AddTranslateMenuItems(core, e);
+        };
 
         InstallSafety(core);
+    }
+
+    /// <summary>
+    /// 往网页自己的右键菜单里补两项：「翻译选中的文字」（有选区才出现）和「翻译此页」。
+    ///
+    /// 刻意不接管整个菜单——只往末尾追加，系统原有的复制/粘贴/检查照旧，
+    /// 免得用户觉得右键被改坏了。
+    /// </summary>
+    private void AddTranslateMenuItems(CoreWebView2 core, CoreWebView2ContextMenuRequestedEventArgs e)
+    {
+        if (_env is null || TranslateRequested is null) return;
+
+        try
+        {
+            var target = e.ContextMenuTarget;
+
+            var selected = target.HasSelection ? target.SelectionText : null;
+            if (!string.IsNullOrWhiteSpace(selected))
+            {
+                var t = selected!.Trim();
+                if (t.Length > 500) t = t[..500];
+                e.MenuItems.Add(MakeMenuItem(Lang.T("menu.translateText"), null, t));
+            }
+
+            var page = target.PageUri;
+            if (!string.IsNullOrWhiteSpace(page) &&
+                !page!.StartsWith("file:", StringComparison.OrdinalIgnoreCase) &&
+                !page.StartsWith("about:", StringComparison.OrdinalIgnoreCase))
+            {
+                e.MenuItems.Add(MakeMenuItem(Lang.T("menu.translatePage"), page, null));
+            }
+        }
+        catch
+        {
+            // 右键菜单加不进去就算了，绝不能因为翻译把右键搞没了
+        }
+    }
+
+    private CoreWebView2ContextMenuItem MakeMenuItem(string label, string? pageUrl, string? selectedText)
+    {
+        var item = _env!.CreateContextMenuItem(label, null, CoreWebView2ContextMenuItemKind.Command);
+        item.CustomItemSelected += (_, _) => TranslateRequested?.Invoke(selectedText, pageUrl);
+        return item;
     }
 
     // ────────────────────────────── 安全与拦截 ──────────────────────────────
@@ -463,7 +516,7 @@ internal abstract class WebTab : UserControl
                 var uri = op?.Uri ?? "";
                 var name = Path.GetFileName(e.ResultFilePath ?? "");
                 if (string.IsNullOrEmpty(name)) name = Path.GetFileName(uri);
-                if (string.IsNullOrEmpty(name)) name = "(未知文件)";
+                if (string.IsNullOrEmpty(name)) name = Lang.T("dl.unknownFile");
 
                 if (Safety.ConfirmDownload)
                 {
@@ -482,7 +535,7 @@ internal abstract class WebTab : UserControl
                 if (op is not null)
                 {
                     DownloadStore.Track(op, name, uri);
-                    StatusText = "已开始下载：" + name;
+                    StatusText = Lang.T("dl.started", name);
                     RaiseChanged();
                 }
             }
@@ -512,9 +565,8 @@ internal abstract class WebTab : UserControl
         try
         {
             var answer = MessageBox.Show(
-                "网页请求打开一个外部程序或协议：\n\n" + uri +
-                "\n\n如果不是你自己点的，请选「否」。",
-                Brand.AppName + " · 外部调用确认",
+                Lang.T("ext.confirmBody", uri),
+                Lang.T("ext.confirmTitle", Brand.AppName),
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
             return answer == DialogResult.Yes;
         }
@@ -584,7 +636,7 @@ internal abstract class WebTab : UserControl
 
     private static string CleanTitle(string? t)
     {
-        if (string.IsNullOrWhiteSpace(t)) return "新标签页";
+        if (string.IsNullOrWhiteSpace(t)) return Lang.T("tab.newTitle");
         t = t.Trim();
         return t.Length > 120 ? t[..120] : t;
     }
@@ -621,7 +673,7 @@ internal sealed class DualTab : WebTab
 
     protected override void BuildViews()
     {
-        Title = "双站对照";
+        Title = Lang.T("tab.dualTitle");
 
         // SplitContainer 的 Panel1MinSize / Panel2MinSize / SplitterDistance
         // 不能在构造期就设：那时控件宽度还是默认的 150，会抛

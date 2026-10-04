@@ -57,7 +57,7 @@ internal sealed class SplashForm : Form
         ShowInTaskbar = false;
         TopMost = true;
         // 无边框窗口的标题不会显示，但留着方便外部按标题找到它（验收脚本用）
-        Text = Brand.AppName + " · 启动中";
+        Text = Lang.T("boot.splash", Brand.AppName);
         BackColor = Color.FromArgb(5, 8, 12);
         KeyPreview = true;
         Cursor = Cursors.Hand;
@@ -412,7 +412,7 @@ internal sealed class SplashForm : Form
 
         if (now < TotalMs - 400)
         {
-            TextRenderer.DrawText(g, "点击任意位置跳过", _hintFont,
+            TextRenderer.DrawText(g, Lang.T("boot.skip"), _hintFont,
                 new Rectangle(row.X + row.Width / 2, row.Y, row.Width / 2, row.Height),
                 Color.FromArgb(0x44, 0x52, 0x60),
                 TextFormatFlags.Right | TextFormatFlags.VerticalCenter);

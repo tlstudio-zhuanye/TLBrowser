@@ -17,14 +17,16 @@ internal sealed class GuardForm : Form
     };
 
     private readonly ListView _lvGuard = MakeList(
-        ("时间", 76), ("状态", 62), ("类型", 74), ("说明", 468));
+        (Lang.T("guard.col.time"), 76), (Lang.T("guard.col.status"), 62),
+        (Lang.T("guard.col.kind"), 74), (Lang.T("guard.col.detail"), 468));
 
     private readonly ListView _lvSystem = MakeList(
-        ("类别", 72), ("项目", 150), ("说明", 458));
+        (Lang.T("guard.col.cat"), 72), (Lang.T("guard.col.item"), 150),
+        (Lang.T("guard.col.detail"), 458));
 
     public GuardForm()
     {
-        Text = Brand.AppName + " · 主页守护";
+        Text = Lang.T("guard.window", Brand.AppName);
         Font = new Font("Microsoft YaHei UI", 9f);
         BackColor = Color.White;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -45,8 +47,8 @@ internal sealed class GuardForm : Form
         catch { }
 
         var header = BuildHeader();
-        var lblGuard = MakeCaption("本次拦截与修复");
-        var lblSystem = MakeCaption("系统检查（只读，本程序没有改动它们）");
+        var lblGuard = MakeCaption(Lang.T("guard.blocked"));
+        var lblSystem = MakeCaption(Lang.T("guard.system"));
         var bar = BuildButtonBar();
 
         _lvGuard.Height = 136;
@@ -88,7 +90,7 @@ internal sealed class GuardForm : Form
         var title = new Label
         {
             AutoSize = false,
-            Text = "主页守护",
+            Text = Lang.T("guard.title"),
             Font = new Font("Microsoft YaHei UI", 14f, FontStyle.Bold),
             ForeColor = Brand.TextMain,
             BackColor = Color.Transparent,
@@ -143,16 +145,16 @@ internal sealed class GuardForm : Form
             e.Graphics.DrawLine(pen, 0, 0, panel.Width, 0);
         };
 
-        var close = new PillButton("关闭", Brand.Blue, true);
+        var close = new PillButton(Lang.T("common.close"), Brand.Blue, true);
         close.Click += (_, _) => Close();
 
-        var log = new PillButton("打开守护日志", Brand.Blue, false);
+        var log = new PillButton(Lang.T("guard.openLog"), Brand.Blue, false);
         log.Click += (_, _) => OpenLog();
 
-        var fix = new PillButton("修复主页劫持", Brand.Purple, false);
+        var fix = new PillButton(Lang.T("guard.fix"), Brand.Purple, false);
         fix.Click += (_, _) => FixHijack();
 
-        var rescan = new PillButton("重新检查", Brand.Blue, false);
+        var rescan = new PillButton(Lang.T("guard.rescan"), Brand.Blue, false);
         rescan.Click += (_, _) => { HomeGuard.ScanSystem(); Reload(); };
 
         panel.Controls.Add(close);
@@ -183,7 +185,7 @@ internal sealed class GuardForm : Form
         foreach (var e in HomeGuard.Session) _lvGuard.Items.Add(GuardRow(e));
         if (_lvGuard.Items.Count == 0)
         {
-            var idle = new ListViewItem(new[] { "—", "正常", "—", "本次启动没有发现任何改动尝试" });
+            var idle = new ListViewItem(new[] { "—", Lang.T("guard.statusOk"), "—", Lang.T("guard.idle") });
             idle.ForeColor = Brand.TextDim;
             _lvGuard.Items.Add(idle);
         }
@@ -231,10 +233,10 @@ internal sealed class GuardForm : Form
         var handled = HomeGuard.HandledCount;
         var parts = new List<string>
         {
-            handled > 0 ? $"已自动拦下并还原 {handled} 项" : "本次启动没有被改动过",
-            attention > 0 ? $"系统层面 {attention} 项待看" : "系统层面无异常"
+            handled > 0 ? Lang.T("guard.sumHandled", handled) : Lang.T("guard.sumNone"),
+            attention > 0 ? Lang.T("guard.sumAttention", attention) : Lang.T("guard.sumClean")
         };
-        return "首页与搜索引擎写死在程序里，外部改不动　·　" + string.Join("　·　", parts);
+        return Lang.T("guard.sumPrefix") + "　·　" + string.Join("　·　", parts);
     }
 
     // ────────────────────────────── 动作 ──────────────────────────────
@@ -245,7 +247,7 @@ internal sealed class GuardForm : Form
         {
             if (!File.Exists(Brand.GuardLogPath))
             {
-                MessageBox.Show(this, "还没有产生过任何记录。", Brand.AppName,
+                MessageBox.Show(this, Lang.T("guard.noLog"), Brand.AppName,
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -253,7 +255,7 @@ internal sealed class GuardForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "打不开日志：" + ex.Message, Brand.AppName,
+            MessageBox.Show(this, Lang.T("guard.logFailed", ex.Message), Brand.AppName,
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
@@ -266,21 +268,8 @@ internal sealed class GuardForm : Form
         const string cp = @"HKCU\Software\Policies\Microsoft\Internet Explorer\Control Panel";
 
         var answer = MessageBox.Show(this,
-            "⚠️ 这一步会改注册表，不会碰 360 的任何程序文件，也不会卸载软件。\n\n" +
-            "会做的事：\n" +
-            "  1. 先把当前 IE 主页 / 搜索设置备份到一个文本文件\n" +
-            "  2. 删除主页锁定值（如果存在）：\n" +
-            $"       {cp} → HomePage / SearchScopes\n" +
-            "     这是「主页设置被锁住、自己改不回来」的常见原因\n" +
-            "  3. 如果 IE 主页被指向了导航站，改回 https://tlstudio.cn\n" +
-            "  4. 如果 IE 搜索页被指向了导航站，改回 https://www.bing.com/search?q=%s\n\n" +
-            "不会做的事：\n" +
-            "  · 不删除或修改 360 的程序文件\n" +
-            "  · 不卸载任何软件\n" +
-            "  · 不改动 HKLM（需要管理员权限的那部分）\n" +
-            "  · 不会碰 IE 正常的主页设置（只处理被判定为导航站的）\n\n" +
-            "要现在执行吗？",
-            Brand.AppName + " · 修复主页劫持",
+            Lang.T("guard.fixAsk", cp),
+            Lang.T("guard.fixTitle", Brand.AppName),
             MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
 
         if (answer != DialogResult.Yes) return;
@@ -290,9 +279,7 @@ internal sealed class GuardForm : Form
         Reload();
 
         MessageBox.Show(this,
-            result + "\n\n改动前的原始值已备份到：\n" + backupPath +
-            "\n\n如果 360 还装着「主页防护」之类的常驻功能，它可能过一会儿又写回去 ——" +
-            "那就需要在 360 自己的设置里关掉它。本程序不会去动别的软件。",
-            Brand.AppName + " · 已完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            Lang.T("guard.fixDone", result, backupPath),
+            Lang.T("guard.fixDoneTitle", Brand.AppName), MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 }

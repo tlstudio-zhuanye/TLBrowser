@@ -160,7 +160,7 @@ internal sealed class AddressBar : Panel
     private readonly Label _hint = new()
     {
         AutoSize = false,
-        Text = "搜索或输入网址",
+        Text = Lang.T("sug.placeholder"),
         ForeColor = Color.FromArgb(0xA6, 0xAE, 0xB8),
         BackColor = Color.White,
         Font = new Font("Microsoft YaHei UI", 9.5f),
@@ -284,9 +284,9 @@ internal sealed class ShieldButton : Control
         Invalidate();
     }
 
-    private string StatusText => _handled > 0 ? $"主页守护 · 已拦下 {_handled}"
-        : _attention > 0 ? $"主页守护 · 待看 {_attention}"
-        : "主页守护 · 正常";
+    private string StatusText => _handled > 0 ? Lang.T("shield.handledShort", _handled)
+        : _attention > 0 ? Lang.T("shield.todoShort", _attention)
+        : Lang.T("shield.normalShort");
 
     public string Tip
     {

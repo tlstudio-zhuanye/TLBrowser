@@ -27,6 +27,7 @@ EXE = ROOT / "dist" / "TLBrowser.exe"
 LNK_PS1 = ROOT / "tools" / "lnk.ps1"
 DESKTOP = Path(os.path.expanduser("~")) / "Desktop"
 LNKS = ["TL 浏览器.lnk", "TL Browser.lnk"]
+EXE_NAME = "TL 浏览器.exe"      # 现行桌面交付是 exe 本体，不是快捷方式
 APP_DIR = Path(os.environ["LOCALAPPDATA"]) / "TLSTUDIO" / "TLBrowser"
 HOME_HTML = APP_DIR / "home" / "index.html"
 GUARD_LOG = APP_DIR / "guard.log"
@@ -113,7 +114,12 @@ def case_shortcut() -> None:
 
     lnk = find_lnk()
     if lnk is None:
-        check(False, "找到桌面快捷方式", f"{DESKTOP} 下没有 TL 浏览器.lnk")
+        # 现在的桌面交付是 exe 本体（不是 .lnk）。没有快捷方式就没有「快捷方式被改」
+        # 这条攻击面，记成 SKIP 而不是 FAIL，别让验收被交付形式卡死。
+        if (DESKTOP / EXE_NAME).exists():
+            say("  [SKIP] 桌面是 exe 本体（无 .lnk），本用例不适用")
+        else:
+            check(False, "找到桌面快捷方式", f"{DESKTOP} 下没有 TL 浏览器.lnk")
         return
     say(f"  目标快捷方式：{lnk}")
 
