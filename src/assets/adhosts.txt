@@ -1,0 +1,139 @@
+# TL 浏览器 · 内置拦截规则
+#
+# 三种写法，一行一条，# 开头是注释：
+#   example.com    域后缀拦截（example.com 及其所有子域）
+#   =ad            精确标签拦截（host 里任意一段正好等于 ad 就拦，例如 ad.foo.com）
+#   +example.com   放行（优先于上面两种，用于「某个站被误拦了」）
+#
+# 只拦资源请求里的图片/脚本/样式/XHR/媒体/字体，**主文档永不拦截**——
+# 这样最坏情况是页面少个组件，绝不会出现「点开就是一片白」。
+# 想自己加规则：%LOCALAPPDATA%\TLSTUDIO\TLBrowser\adblock_user.txt，格式同上。
+
+# ── 国际广告投放与交换 ──
+doubleclick.net
+2mdn.net
+googlesyndication.com
+googleadservices.com
+googletagservices.com
+adservice.google.com
+serving-sys.com
+adnxs.com
+adsrvr.org
+pubmatic.com
+rubiconproject.com
+openx.net
+casalemedia.com
+smartadserver.com
+adform.net
+bidswitch.net
+indexexchange.com
+33across.com
+sharethrough.com
+yieldmo.com
+sovrn.com
+lijit.com
+gumgum.com
+spotxchange.com
+teads.tv
+criteo.com
+criteo.net
+adroll.com
+turn.com
+tapad.com
+mathtag.com
+everesttech.net
+demdex.net
+bluekai.com
+rlcdn.com
+crwdcntrl.net
+agkn.com
+eyeota.net
+moatads.com
+adsafeprotected.com
+
+# ── 内容推荐（站内「猜你喜欢」那类）──
+outbrain.com
+taboola.com
+zemanta.com
+
+# ── 行为分析与热图 ──
+google-analytics.com
+googletagmanager.com
+scorecardresearch.com
+quantserve.com
+omtrdc.net
+2o7.net
+clarity.ms
+hotjar.com
+mouseflow.com
+crazyegg.com
+fullstory.com
+parsely.com
+chartbeat.com
+segment.io
+segment.com
+mixpanel.com
+amplitude.com
+heapanalytics.com
+kissmetrics.com
+nr-data.net
+
+# ── 移动归因 ──
+# 注意：不拦 branch.io —— 它是深链跳转服务，拦了会让很多站的正常外链失效
+appsflyer.com
+adjust.com
+kochava.com
+
+# ── 国内广告与统计 ──
+cnzz.com
+umeng.com
+umengcloud.com
+talkingdata.com
+zhugeio.com
+growingio.com
+sensorsdata.cn
+51.la
+51yes.com
+tanx.com
+mmstat.com
+alimama.com
+admaster.com.cn
+miaozhen.com
+ipinyou.com
+mediav.com
+adchina.com
+allyes.com
+adbug.cn
+hdtmedia.com
+adview.cn
+ad.oceanengine.com
+union.360.cn
+union.sogou.com
+ad.sogou.com
+analytics.sogou.com
+e.qq.com
+gdt.qq.com
+pgdt.gtimg.cn
+adsview.qq.com
+pos.gtimg.cn
+cpro.baidu.com
+pos.baidu.com
+hm.baidu.com
+union.baidu.com
+mobads.baidu.com
+cupid.iqiyi.com
+afp.iqiyi.com
+ads.sohu.com
+
+# ── 只拦「这几个标签单独成段」的域名 ──
+# 比整域拦截精准：ad.某站.com 拦，某站.com 照常
+=ad
+=ads
+=adserver
+=adservice
+=adsystem
+=advert
+=analytics
+=beacon
+=pixel
+=tracker

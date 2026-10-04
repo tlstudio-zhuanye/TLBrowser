@@ -1,0 +1,42 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TLBrowser</AssemblyName>
+    <RootNamespace>TLBrowser</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationDefaultFont>Microsoft YaHei UI, 9pt</ApplicationDefaultFont>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <Version>1.0.0</Version>
+    <Company>TLSTUDIO</Company>
+    <Product>TL 浏览器</Product>
+    <Copyright>TLSTUDIO</Copyright>
+    <NeutralLanguage>zh-CN</NeutralLanguage>
+    <!-- 单文件自包含 + 压缩 + ReadyToRun：49MB 左右，冷启动 ~1.2s（纯压缩要 1.9s） -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <DebugType>none</DebugType>
+    <!-- WFO1000：这些自绘控件只在代码里用，不进设计器，不需要属性序列化配置 -->
+    <NoWarn>$(NoWarn);WFO1000;MSB3277</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="assets\logo.png" />
+    <EmbeddedResource Include="assets\logo_doubler.png" />
+    <EmbeddedResource Include="assets\home.html" />
+    <EmbeddedResource Include="assets\adhosts.txt" />
+  </ItemGroup>
+
+</Project>

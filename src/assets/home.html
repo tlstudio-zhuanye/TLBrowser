@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>新标签页</title>
+<style>
+  :root{
+    --blue:#1D9CD8; --ink:#1f242b; --dim:#8b95a1;
+    --line:#e3e8ee; --bg:#f7f9fb; --card:#ffffff; --placeholder:#aab3bd; --faint:#bcc5cf;
+  }
+  /* 主页永远是白的：不做暗色适配。系统深色主题时别的页面随它去，
+     新标签页必须保持亮色——这是用户明确要的。 */
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; padding:40px 24px; background:var(--bg); color:var(--ink);
+    font-family:"Microsoft YaHei UI","Segoe UI",system-ui,-apple-system,sans-serif;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* 入场：整组元素从下方 8px 浮上来。只动 transform 和 opacity，
+     不碰布局属性，所以不会触发重排，也不会把自动聚焦的光标顶走。 */
+  @keyframes rise{ from{opacity:0; transform:translateY(8px)} to{opacity:1; transform:none} }
+  .mark,.search,.links{animation:rise .34s cubic-bezier(.22,.61,.36,1) both}
+  .search{animation-delay:.06s}
+  .links{animation-delay:.12s}
+  @media (prefers-reduced-motion: reduce){
+    .mark,.search,.links{animation:none}
+  }
+
+  .mark{width:76px;height:76px;object-fit:contain;opacity:.95;user-select:none;-webkit-user-drag:none}
+
+  form.search{
+    margin-top:36px; width:100%; max-width:560px; height:52px;
+    display:flex; align-items:center; gap:8px; padding:0 7px 0 20px;
+    background:var(--card); border:1px solid var(--line); border-radius:26px;
+    transition:border-color .18s ease, box-shadow .18s ease;
+  }
+  form.search:focus-within{
+    border-color:var(--blue); box-shadow:0 0 0 4px rgba(29,156,216,.10);
+  }
+  form.search input{
+    flex:1; min-width:0; border:0; outline:none; background:transparent;
+    font:inherit; font-size:15px; color:var(--ink);
+  }
+  form.search input::placeholder{color:var(--placeholder)}
+  form.search button{
+    border:0; height:38px; padding:0 20px; border-radius:19px; cursor:pointer;
+    background:var(--blue); color:#fff; font:inherit; font-size:13px;
+    transition:background .16s ease;
+  }
+  form.search button:hover{background:#1789c1}
+  form.search button:active{transform:translateY(1px)}
+
+  .links{margin-top:32px; display:flex; flex-wrap:wrap; gap:14px 36px; justify-content:center}
+  a.site{
+    color:var(--dim); text-decoration:none; font-size:13.5px; letter-spacing:.2px;
+    padding:5px 2px; border-bottom:1px solid transparent; transition:.15s ease;
+  }
+  a.site:hover{color:var(--blue); border-bottom-color:var(--blue)}
+
+  .hint{
+    position:fixed; left:0; right:0; bottom:16px; text-align:center;
+    font-size:11.5px; color:var(--faint); letter-spacing:.2px;
+  }
+</style>
+</head>
+<body>
+  <img class="mark" src="logo.png" alt="">
+
+  <form class="search" action="https://www.bing.com/search" method="get" autocomplete="off">
+    <input type="search" name="q" placeholder="搜索或输入网址" autofocus>
+    <button type="submit">搜索</button>
+  </form>
+
+  <div class="links">
+    <a class="site" href="%%SITE_TL%%">tlstudio.cn</a>
+    <a class="site" href="%%SITE_DOUBLER%%">tldoublerstudio.cn</a>
+  </div>
+
+  <div class="hint">Ctrl+T 新标签　·　Ctrl+1 / Ctrl+2 直达　·　Ctrl+Shift+D 双站对照</div>
+
+<script>
+(function () {
+  var form = document.querySelector('form.search');
+  var box = form.querySelector('input');
+  if (!form || !box) return;
+
+  /* 像网址就直接去，像人话才交给搜索。
+     规则要和程序侧 Brand.IsAddressLike 保持一致：
+     不含空格、有点、顶级域是字母且至少两位。 */
+  function looksLikeHost(s) {
+    if (s.indexOf(' ') >= 0) return false;
+    var host = s.split('/')[0];
+    if (host.indexOf('.') < 0) return false;
+    if (host.charAt(0) === '.' || host.charAt(host.length - 1) === '.') return false;
+    if (!/^[A-Za-z0-9._:-]+$/.test(host)) return false;
+    var tld = host.split(':')[0].split('.').pop();
+    return tld.length >= 2 && /^[A-Za-z]+$/.test(tld);
+  }
+
+  form.addEventListener('submit', function (e) {
+    var q = box.value.trim();
+    if (q.length === 0) { e.preventDefault(); return; }
+    if (/^https?:\/\//i.test(q) || looksLikeHost(q)) {
+      e.preventDefault();
+      location.href = /^https?:\/\//i.test(q) ? q : 'https://' + q;
+    }
+  });
+})();
+</script>
+</body>
+</html>
