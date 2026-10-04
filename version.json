@@ -1,6 +1,6 @@
 {
-  "version": "1.0.0",
-  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.0.0/TLBrowser.exe",
-  "notes": "首个正式版：内置 TLSTUDIO 双站入口、广告拦截、主页守护、下载中心、双站对照，单文件免安装。",
-  "publishedAt": "2026-10-04"
+  "version": "1.1.0",
+  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.0/TLBrowser.exe",
+  "notes": "新增：界面中英文一键切换、网页整页翻译、选中文字划词翻译。主页守护与广告拦截逻辑不变。",
+  "publishedAt": "2026-10-05"
 }
