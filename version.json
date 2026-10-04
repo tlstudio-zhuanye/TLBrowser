@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0",
-  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.0/TLBrowser.exe",
-  "notes": "新增：界面中英文一键切换、网页整页翻译、选中文字划词翻译。主页守护与广告拦截逻辑不变。",
+  "version": "1.1.1",
+  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.1/TLBrowser.exe",
+  "notes": "维护版本，功能与 v1.1.0 一致：界面中英文切换、网页整页翻译、划词翻译。主页守护与广告拦截逻辑不变。",
   "publishedAt": "2026-10-05"
 }
