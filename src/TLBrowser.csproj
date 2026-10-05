@@ -35,7 +35,9 @@
   <ItemGroup>
     <EmbeddedResource Include="assets\logo.png" />
     <EmbeddedResource Include="assets\logo_doubler.png" />
-    <EmbeddedResource Include="assets\home.html" />
+    <!-- 主页模板：编译进 exe，运行时按当前语言现场生成后从内存返回；
+         磁盘上不再有任何 .html，外部程序无从篡改 -->
+    <EmbeddedResource Include="assets\home.template.html" />
     <EmbeddedResource Include="assets\adhosts.txt" />
   </ItemGroup>
 

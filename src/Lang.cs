@@ -141,6 +141,25 @@ internal static class Lang
         ["sug.search"] = new[] { "搜索", "Search" },
         ["sug.placeholder"] = new[] { "搜索或输入网址", "Search or type a URL" },
 
+        // ── 新标签页（主页）──
+        // 主页是内嵌的 HTML，里面这几段文案靠 %%占位符%% 在写盘时注入，
+        // 所以改语言时必须重新落盘一次，否则网页还是上一门语言。
+        ["home.lang"] = new[] { "zh-CN", "en" },
+        ["home.title"] = new[] { "新标签页", "New tab" },
+        ["home.hint"] = new[] { "Ctrl+T 新标签　·　Ctrl+1 / Ctrl+2 直达　·　Ctrl+Shift+D 双站对照",
+                                "Ctrl+T New tab　·　Ctrl+1 / Ctrl+2 Jump　·　Ctrl+Shift+D Side-by-side" },
+        ["home.tilesLabel"] = new[] { "快捷入口", "Quick links" },
+        ["home.searchWith"] = new[] { "搜索", "Search with" },
+        ["home.addTile"] = new[] { "添加快捷入口", "Add shortcut" },
+        ["home.removeTile"] = new[] { "移除此快捷入口", "Remove this shortcut" },
+        ["home.addTitle"] = new[] { "添加快捷入口", "Add shortcut" },
+        ["home.nameLabel"] = new[] { "名称", "Name" },
+        ["home.urlLabel"] = new[] { "网址", "Address" },
+        ["home.emptyName"] = new[] { "网址不能为空。", "Address cannot be empty." },
+        ["home.badUrl"] = new[] { "网址看起来不对，请以 http:// 或 https:// 开头。",
+                                  "That does not look like a valid address. Use http:// or https://." },
+        ["home.removed"] = new[] { "已移除 {0}。", "Removed {0}." },
+
         // ── 守护盾牌提示 ──
         ["shield.title"] = new[] { "主页守护：", "Homepage guard:" },
         ["shield.hardcoded"] = new[] { "首页与搜索引擎写在程序里，外部程序改不动。",
@@ -181,8 +200,8 @@ internal static class Lang
         ["common.close"] = new[] { "关闭", "Close" },
         ["common.error"] = new[] { "出错了", "Error" },
         ["common.tip"] = new[] { "提示", "Tip" },
-        ["common.languageSwitched"] = new[] { "界面语言已切换为「{0}」，部分界面将在下次打开时完全生效。",
-                                              "Language switched to \"{0}\". Some panels apply fully on next open." },
+        // 新标签页现在是每次导航现场生成的，切语言立刻生效，不用再提示"下次打开才生效"
+        ["common.languageSwitched"] = new[] { "界面语言已切换为「{0}」。", "Language switched to \"{0}\"." },
 
         // ── 下载面板 ──
         ["dl.window"] = new[] { "{0} · 下载", "{0} · Downloads" },

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Text;
+using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -332,7 +334,182 @@ internal abstract class WebTab : UserControl
             AddTranslateMenuItems(core, e);
         };
 
+        // 放在安全模块之后订阅：这样新标签页的响应是最后写入的，
+        // 即便哪天拦截规则误伤到本站，也保证主页一定出得来（绝不白屏）。
         InstallSafety(core);
+        InstallHomeHost(core);
+    }
+
+    // ────────────────────────────── 新标签页（内存直供） ──────────────────────────────
+
+    /// <summary>
+    /// 把新标签页挂到一个虚拟域名上，由这里在内存里直接生成 HTML 还给内核。
+    ///
+    /// 以前是「内嵌 home.html → 落盘 → file:// 打开」，代价是：
+    ///   1. 切界面语言时网页不跟着变（用户报的 bug）；
+    ///   2. 磁盘上多一个可被改写的文件，本身就是主页劫持的落点。
+    /// 现在磁盘上没有文件，页面每次按当前语言现场生成。
+    /// </summary>
+    private void InstallHomeHost(CoreWebView2 core)
+    {
+        if (_env is null) return;
+
+        try { core.AddWebResourceRequestedFilter(HomePage.Origin + "/*", CoreWebView2WebResourceContext.All); }
+        catch { }
+
+        core.WebResourceRequested += (_, e) =>
+        {
+            try
+            {
+                var uri = e.Request?.Uri;
+                if (string.IsNullOrEmpty(uri) || _env is null) return;
+                if (!uri.StartsWith(HomePage.Origin, StringComparison.OrdinalIgnoreCase)) return;
+
+                var path = "/";
+                try { path = new Uri(uri).AbsolutePath; } catch { }
+
+                if (path is "/newtab" or "/" or "/index.html")
+                {
+                    var bytes = Encoding.UTF8.GetBytes(HomePage.Build());
+                    e.Response = _env.CreateWebResourceResponse(
+                        new MemoryStream(bytes), 200, "OK", "Content-Type: text/html; charset=utf-8");
+                    return;
+                }
+
+                if (path == "/logo.png")
+                {
+                    var png = ReadEmbedded(Brand.ResLogo);
+                    if (png is not null)
+                        e.Response = _env.CreateWebResourceResponse(
+                            new MemoryStream(png), 200, "OK", "Content-Type: image/png");
+                }
+            }
+            catch { }
+        };
+
+        // 网页 → 宿主的消息桥（联想、跳转、增删快捷入口）
+        core.WebMessageReceived += (_, e) => HandleHomeMessage(core, e.WebMessageAsJson);
+    }
+
+    private static byte[]? ReadEmbedded(string resourceName)
+    {
+        try
+        {
+            using var s = typeof(Brand).Assembly.GetManifestResourceStream(resourceName);
+            if (s is null) return null;
+            using var ms = new MemoryStream();
+            s.CopyTo(ms);
+            return ms.ToArray();
+        }
+        catch { return null; }
+    }
+
+    private void HandleHomeMessage(CoreWebView2 core, string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("type", out var t)) return;
+            var type = t.GetString();
+
+            switch (type)
+            {
+                case "suggest":
+                {
+                    var q = root.TryGetProperty("q", out var qq) ? (qq.GetString() ?? "") : "";
+                    core.PostWebMessageAsJson(JsonSerializer.Serialize(new
+                    {
+                        type = "suggest",
+                        q,
+                        items = BuildSuggestions(q)
+                    }));
+                    break;
+                }
+
+                case "open":
+                {
+                    var url = root.TryGetProperty("url", out var u) ? (u.GetString() ?? "") : "";
+                    if (url.Length > 0) Navigate(url);
+                    break;
+                }
+
+                case "addLink":
+                {
+                    var title = root.TryGetProperty("title", out var ti) ? (ti.GetString() ?? "") : "";
+                    var url = root.TryGetProperty("url", out var u) ? (u.GetString() ?? "") : "";
+                    HomePage.Links.Add(title, url);
+                    PushLinks(core);
+                    break;
+                }
+
+                case "removeLink":
+                {
+                    var url = root.TryGetProperty("url", out var u) ? (u.GetString() ?? "") : "";
+                    HomePage.Links.Remove(url);
+                    PushLinks(core);
+                    break;
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void PushLinks(CoreWebView2 core)
+    {
+        try
+        {
+            core.PostWebMessageAsJson(JsonSerializer.Serialize(new
+            {
+                type = "links",
+                items = HomePage.Links.Items
+            }));
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 地址栏式联想。顺序照抄浏览器的习惯：
+    /// 像网址的先给「直接访问」，再是官网、书签、历史，最后兜一条「搜索」。
+    /// </summary>
+    private static List<Dictionary<string, string>> BuildSuggestions(string raw)
+    {
+        var q = (raw ?? "").Trim();
+        var out_ = new List<Dictionary<string, string>>();
+        if (q.Length == 0) return out_;
+
+        if (Brand.IsAddressLike(q))
+        {
+            var url = q.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                      q.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? q : "https://" + q;
+            out_.Add(Item(q, url, "navigate"));
+        }
+
+        foreach (var site in new[] { Brand.SiteTl, Brand.SiteDoubler })
+        {
+            if (site.Contains(q, StringComparison.OrdinalIgnoreCase))
+                out_.Add(Item(site.Replace("https://", ""), site, "brand"));
+        }
+
+        foreach (var b in Bookmarks.All())
+        {
+            if (out_.Count >= 8) break;
+            if (b.Title.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                b.Url.Contains(q, StringComparison.OrdinalIgnoreCase))
+                out_.Add(Item(string.IsNullOrWhiteSpace(b.Title) ? b.Url : b.Title, b.Url, "navigate"));
+        }
+
+        foreach (var h in HistoryStore.Match(q, 6))
+        {
+            if (out_.Count >= 8) break;
+            out_.Add(Item(string.IsNullOrWhiteSpace(h.Title) ? h.Url : h.Title, h.Url, "navigate"));
+        }
+
+        out_.Add(Item(q, Brand.SearchTemplate + Uri.EscapeDataString(q), "search"));
+        return out_;
+
+        static Dictionary<string, string> Item(string text, string url, string kind) =>
+            new() { ["text"] = text, ["url"] = url, ["kind"] = kind };
     }
 
     /// <summary>
@@ -610,10 +787,10 @@ internal abstract class WebTab : UserControl
     /// <summary>双站对照时高亮当前侧。</summary>
     protected virtual void UpdateActiveIndicators() { }
 
+    /// <summary>是不是停在新标签页上。现在主页是内存生成的虚拟地址（HomePage.Host）。</summary>
     protected static bool IsHomePageUrl(string? url) =>
         !string.IsNullOrEmpty(url) &&
-        url.StartsWith("file:", StringComparison.OrdinalIgnoreCase) &&
-        url.Contains("/home/index.html", StringComparison.OrdinalIgnoreCase);
+        url.StartsWith(HomePage.Origin, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsNavigableScheme(string uri) =>
         uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||

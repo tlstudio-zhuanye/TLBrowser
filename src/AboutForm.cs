@@ -22,12 +22,9 @@ internal sealed class AboutForm : Form
             SizeMode = PictureBoxSizeMode.Zoom,
             BackColor = Color.Transparent
         };
-        try
-        {
-            var p = Path.Combine(Brand.HomeDir, "logo.png");
-            if (File.Exists(p)) logo.Image = Image.FromFile(p);
-        }
-        catch { }
+        // logo 直接读内嵌资源。以前是读"首页落盘时顺手写出来的那一份"，
+        // 现在首页不落盘了，那份文件也不存在。
+        logo.Image = Brand.LoadImage(Brand.ResLogo);
 
         var title = new Label
         {

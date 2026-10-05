@@ -169,8 +169,10 @@ internal static class Program
     /// </summary>
     private static void RunGuardChecks()
     {
-        try { HomeGuard.VerifyHomeFile(); } catch { }
-        try { Brand.MaterializeHome(); } catch { }
+        // 主页不再"先比对磁盘文件再覆盖写盘"：磁盘上已经没有首页文件了，
+        // 页面是内存里现场生成的。这里只校验生成器自己的输出有没有跑偏。
+        try { HomeGuard.CleanupObsoleteHome(); } catch { }
+        try { HomeGuard.VerifyHomeContent(); } catch { }
         try { HomeGuard.HealShortcuts(); } catch { }
         try { HomeGuard.ScanSystem(); } catch { }
     }

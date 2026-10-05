@@ -1072,11 +1072,42 @@ internal sealed class BrowserForm : Form
         return root;
     }
 
-    /// <summary>切换语言。菜单是每次动态构建的，下次打开即生效；状态条当场刷新。</summary>
+    /// <summary>工具栏提示跟着当前语言走。切语言时调一次。</summary>
+    private void ApplyToolbarTips()
+    {
+        _btnBack.SetTip(Lang.T("tip.back"));
+        _btnForward.SetTip(Lang.T("tip.forward"));
+        _btnReload.SetTip(Lang.T("tip.reload"));
+        _btnHome.SetTip(Lang.T("tip.home"));
+        _btnMenu.SetTip(Lang.T("tip.menu"));
+    }
+
+    /// <summary>
+    /// 切换语言。菜单每次动态重建，状态条当场刷新。
+    ///
+    /// 新标签页是**每次导航时现场生成**的（不落盘），所以这里只要把停在首页的标签
+    /// 重新导航一次，网页立刻就是新语言 —— 不用等下次启动。
+    /// 其余 WinForms 控件（菜单、工具栏、状态条）也当场重建。
+    /// </summary>
     private void SwitchLanguage(string lang)
     {
         if (string.Equals(lang, Lang.EN, StringComparison.OrdinalIgnoreCase) == Lang.IsEn) return;
         var name = Lang.SetLanguage(lang);
+
+        // 工具栏提示写在字段初始化器里，只跑一次，所以切语言时必须手动刷一遍
+        // （主菜单是每次弹出时动态构建的，不用管）
+        ApplyToolbarTips();
+
+        // 停在新标签页的标签重新加载一次，网页语言跟着变
+        foreach (var t in _tabs)
+        {
+            try
+            {
+                if (t.IsHomePage) t.GoHome();
+            }
+            catch { }
+        }
+
         UpdateShield();
         _statusText.Text = Lang.T("common.languageSwitched", name);
     }

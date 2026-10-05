@@ -159,16 +159,16 @@ def case_shortcut() -> None:
 
 def case_home() -> None:
     say()
-    say("C. 首页文件被塞进跳转脚本")
+    say("C. 首页完整性")
 
+    # 主页改成内存里现场生成（不再落盘），磁盘上根本没有 index.html 可被篡改 ——
+    # 防护从"比对文件"升级成了"根本没有文件"。旧用例只能 SKIP。
     if not HOME_HTML.exists():
-        # 先生成一份
-        p = launch(wait=3.0)
-        kill(p)
-    if not HOME_HTML.exists():
-        check(False, "首页文件存在", str(HOME_HTML))
+        say("  [SKIP] 主页已改为运行时生成，磁盘上没有 index.html，本用例不适用")
+        say("         对应的防护换成了 --selftest 里的「新标签页生成内容」样本（见 D 用例）")
         return
 
+    # 兼容：万一哪天又回到落盘方案，这段还能用
     pristine = HOME_HTML.read_text(encoding="utf-8", errors="replace")
     check("bing.com/search" in pristine, "原始首页里是写死的搜索地址")
 

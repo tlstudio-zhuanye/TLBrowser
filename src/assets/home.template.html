@@ -1,0 +1,471 @@
+<!doctype html>
+<!--
+  新标签页模板。**这不是给用户看的静态页面** ——
+  它由 HomePage.Build() 在每次请求时按当前语言现场注入 %%占位符%% 后从内存返回给内核，
+  磁盘上不存在这个文件，外部程序也就无从篡改。
+
+  交互对齐 Microsoft Edge 的新标签页：
+    · 搜索框聚焦后展开成 omnibox，下拉联想面板支持 ↑↓ 选择 / Enter 直达 / Esc 还原
+    · Fluent 观感：圆角、悬停上浮、焦点环、统一缓动；并尊重「减少动效」设置
+    · 快捷入口磁贴可增删（数据走宿主的消息桥，落在 quicklinks.json）
+    · 无障碍：combobox / listbox / option 语义、aria-live 播报、完整键盘操作
+-->
+<html lang="%%LANG%%">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>%%TITLE%%</title>
+<style>
+  :root{
+    --blue:#1D9CD8; --blue-dark:#1789C1;
+    --ink:#1f242b; --dim:#6b7480; --faint:#a9b2bd;
+    --line:#e3e8ee; --bg:#f7f9fb; --card:#fff; --hover:#f2f6fa;
+    /* Fluent 的标准缓动 */
+    --ease:cubic-bezier(.33,0,.67,1);
+    --fast:120ms; --base:180ms;
+  }
+  /* 主页永远是白的：不做暗色适配。系统深色主题时别的页面随它去，
+     新标签页必须保持亮色——这是明确要的。 */
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Microsoft YaHei UI",sans-serif;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:40px 24px; -webkit-font-smoothing:antialiased;
+  }
+
+  /* 入场：整组元素从下方 8px 浮上来。只动 transform 和 opacity，不触发重排。 */
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .logo,.omni,.tiles,.hint{animation:rise 320ms var(--ease) both}
+  .omni{animation-delay:60ms}
+  .tiles{animation-delay:120ms}
+  .hint{animation-delay:180ms}
+
+  .logo{width:76px;height:76px;object-fit:contain;user-select:none;-webkit-user-drag:none}
+
+  /* ── omnibox ─────────────────────────────────────────── */
+  .omni{position:relative;margin-top:34px;width:100%;max-width:560px}
+  .box{
+    display:flex; align-items:center; gap:8px; height:52px;
+    padding:0 6px 0 16px; background:var(--card);
+    border:1px solid var(--line); border-radius:26px;
+    transition:border-color var(--fast) var(--ease), box-shadow var(--base) var(--ease),
+               max-width var(--base) var(--ease);
+  }
+  /* 聚焦时轻微"展开"：影子加深 + 描边变蓝，像 Edge 那样从搜索框过渡到地址栏 */
+  .omni.open .box{border-color:var(--blue);box-shadow:0 6px 20px rgba(15,32,51,.10)}
+  .box:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,156,216,.16)}
+
+  .glass{flex:0 0 auto;width:18px;height:18px;color:var(--faint)}
+  .box input{
+    flex:1;min-width:0;border:0;outline:none;background:transparent;
+    font:inherit;font-size:15px;color:var(--ink);
+  }
+  .box input::placeholder{color:var(--faint)}
+  .box button{
+    flex:0 0 auto;height:38px;padding:0 18px;border:0;border-radius:19px;cursor:pointer;
+    background:var(--blue);color:#fff;font:inherit;font-size:13px;
+    transition:background var(--fast) var(--ease);
+  }
+  .box button:hover{background:var(--blue-dark)}
+  .box button:active{transform:translateY(1px)}
+
+  /* ── 联想面板 ─────────────────────────────────────────── */
+  .panel{
+    position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:5;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 8px 26px rgba(15,32,51,.12);overflow:hidden;
+    padding:4px;max-height:296px;overflow-y:auto;
+  }
+  .panel[hidden]{display:none}
+  @keyframes drop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .panel{animation:drop 140ms var(--ease)}
+
+  .row{
+    display:flex;align-items:center;gap:10px;height:38px;padding:0 12px;
+    border-radius:6px;cursor:pointer;font-size:14px;color:var(--ink);
+  }
+  .row:hover{background:var(--hover)}
+  /* 键盘选中态：Fluent 用左侧 2px 竖条 + 底色，鼠标和键盘共用一套高亮 */
+  .row[aria-selected="true"]{background:var(--hover);box-shadow:inset 2px 0 0 var(--blue)}
+  .row .ico{
+    flex:0 0 auto;width:20px;height:20px;border-radius:4px;
+    display:grid;place-items:center;font-size:10px;font-weight:600;
+    background:#eef2f6;color:var(--dim);
+  }
+  .row .txt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .kind{flex:0 0 auto;font-size:11.5px;color:var(--faint)}
+  .row .mark{font-weight:600}
+
+  /* ── 快捷入口磁贴 ─────────────────────────────────────── */
+  .tiles{
+    margin-top:30px;display:flex;flex-wrap:wrap;gap:12px;justify-content:center;max-width:660px;
+  }
+  .tile{
+    position:relative;width:104px;height:96px;border-radius:10px;
+    background:var(--card);border:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+    text-decoration:none;color:var(--ink);cursor:pointer;
+    transition:transform var(--base) var(--ease), box-shadow var(--base) var(--ease),
+               border-color var(--fast) var(--ease);
+  }
+  .tile:hover{transform:translateY(-3px);box-shadow:0 6px 16px rgba(15,32,51,.10);border-color:#d5dde5}
+  .tile:focus-visible{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,156,216,.18)}
+  .tile .ico{
+    width:40px;height:40px;border-radius:8px;display:grid;place-items:center;
+    font-size:14px;font-weight:600;color:#fff;background:var(--blue);
+  }
+  .tile .txt{
+    max-width:92px;font-size:12px;color:var(--dim);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .tile .x{
+    position:absolute;top:4px;right:4px;width:20px;height:20px;border:0;border-radius:10px;
+    background:rgba(255,255,255,.92);color:var(--dim);cursor:pointer;font-size:13px;line-height:1;
+    display:grid;place-items:center;opacity:0;transition:opacity var(--fast) var(--ease);
+  }
+  .tile:hover .x,.tile:focus-within .x,.x:focus-visible{opacity:1}
+  .x:hover{background:#eceff3;color:var(--ink)}
+  .tile.add .ico{background:#eef2f6;color:var(--dim);font-size:20px;font-weight:400}
+
+  .hint{
+    position:fixed;left:0;right:0;bottom:14px;text-align:center;
+    font-size:11.5px;color:var(--faint);letter-spacing:.2px;margin:0;
+  }
+
+  /* ── 添加快捷入口 ─────────────────────────────────────── */
+  dialog{
+    border:1px solid var(--line);border-radius:10px;padding:20px;width:320px;
+    box-shadow:0 12px 34px rgba(15,32,51,.18);color:var(--ink);
+  }
+  dialog::backdrop{background:rgba(15,32,51,.28)}
+  dialog h2{margin:0 0 14px;font-size:15px}
+  dialog label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
+  dialog input{
+    width:100%;height:34px;padding:0 10px;margin-bottom:12px;
+    border:1px solid var(--line);border-radius:6px;font:inherit;font-size:13px;outline:none;
+  }
+  dialog input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,156,216,.16)}
+  dialog .btns{display:flex;justify-content:flex-end;gap:8px}
+  dialog .btns button{
+    height:32px;padding:0 16px;border-radius:6px;font:inherit;font-size:13px;cursor:pointer;
+    border:1px solid var(--line);background:var(--card);color:var(--ink);
+    transition:background var(--fast) var(--ease);
+  }
+  dialog .btns button:hover{background:var(--hover)}
+  dialog .btns button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  dialog .btns button.primary:hover{background:var(--blue-dark)}
+  .err{color:#c0392b;font-size:12px;margin:-6px 0 10px;min-height:16px}
+
+  /* 只给屏幕阅读器 */
+  .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+  @media (prefers-reduced-motion: reduce){
+    .logo,.omni,.tiles,.hint,.panel{animation:none}
+    .tile:hover{transform:none}
+    *{transition-duration:1ms !important}
+  }
+</style>
+</head>
+<body>
+  <img class="logo" src="/logo.png" alt="">
+
+  <div class="omni" id="omni">
+    <form class="box" id="box" role="search" autocomplete="off">
+      <svg class="glass" viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="9" cy="9" r="6" fill="none" stroke="currentColor" stroke-width="1.8"/>
+        <path d="M13.5 13.5 L17 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <input id="q" type="text" autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="false" aria-controls="panel"
+             aria-autocomplete="list" aria-haspopup="listbox">
+      <button type="submit" id="go"></button>
+    </form>
+    <div class="panel" id="panel" role="listbox" hidden></div>
+  </div>
+
+  <nav class="tiles" id="tiles" role="list"></nav>
+
+  <p class="hint" id="hint"></p>
+
+  <dialog id="dlg" aria-labelledby="dlgTitle">
+    <h2 id="dlgTitle"></h2>
+    <label for="fName" id="lName"></label>
+    <input id="fName" type="text">
+    <label for="fUrl" id="lUrl"></label>
+    <input id="fUrl" type="text" placeholder="https://">
+    <div class="err" id="err"></div>
+    <div class="btns">
+      <button type="button" id="bCancel"></button>
+      <button type="button" class="primary" id="bOk"></button>
+    </div>
+  </dialog>
+
+  <span class="sr" id="live" role="status" aria-live="polite"></span>
+
+<script>
+(function () {
+  var T     = %%I18N%%;
+  var LINKS = %%LINKS%%;
+  var SEARCH = "%%SEARCH%%";
+
+  var omni  = document.getElementById('omni');
+  var box   = document.getElementById('box');
+  var input = document.getElementById('q');
+  var panel = document.getElementById('panel');
+  var tiles = document.getElementById('tiles');
+  var live  = document.getElementById('live');
+
+  var items = [];      // 当前联想结果
+  var sel   = -1;      // 键盘选中的行
+  var lastQ = '';      // 上一次请求联想时用的输入，用来丢弃过期回包
+
+  /* ── 与宿主对话。宿主是 C#，回包走 PostWebMessageAsJson ── */
+  var bridge = window.chrome && window.chrome.webview;
+  function post(o) { if (bridge) bridge.postMessage(o); }
+  function say(s) { live.textContent = s; }
+
+  input.placeholder = T.ph;
+  input.setAttribute('aria-label', T.ph);
+  document.getElementById('go').textContent = T.go;
+  document.getElementById('hint').textContent = T.hint;
+  tiles.setAttribute('aria-label', T.tilesLabel);
+
+  /* 像网址就直接去，像人话才交给搜索。
+     规则要和宿主侧 Brand.IsAddressLike 保持一致：
+     不含空格、有点、顶级域是字母且至少两位。 */
+  function looksLikeHost(s) {
+    if (s.indexOf(' ') >= 0) return false;
+    var host = s.split('/')[0];
+    if (host.indexOf('.') < 0) return false;
+    if (host.charAt(0) === '.' || host.charAt(host.length - 1) === '.') return false;
+    if (!/^[A-Za-z0-9._:-]+$/.test(host)) return false;
+    var tld = host.split(':')[0].split('.').pop();
+    return tld.length >= 2 && /^[A-Za-z]+$/.test(tld);
+  }
+
+  function open(url) {
+    if (bridge) { post({ type: 'open', url: url }); return; }
+    location.href = url;
+  }
+
+  function submit(q) {
+    q = q.trim();
+    if (!q) return;
+    if (/^https?:\/\//i.test(q) || looksLikeHost(q)) {
+      open(/^https?:\/\//i.test(q) ? q : 'https://' + q);
+    } else {
+      open(SEARCH + '?q=' + encodeURIComponent(q));
+    }
+  }
+
+  /* ── 联想面板 ── */
+  function closePanel() {
+    panel.hidden = true;
+    panel.textContent = '';
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+    omni.classList.remove('open');
+    items = []; sel = -1;
+  }
+
+  function render() {
+    panel.textContent = '';
+    if (!items.length) { closePanel(); return; }
+    items.forEach(function (it, i) {
+      var row = document.createElement('div');
+      row.className = 'row';
+      row.id = 'opt' + i;
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', i === sel ? 'true' : 'false');
+
+      var ico = document.createElement('span');
+      ico.className = 'ico';
+      ico.textContent = it.kind === 'search' ? '\uD83D\uDD0D' : '\u2197';
+      row.appendChild(ico);
+
+      var txt = document.createElement('span');
+      txt.className = 'txt';
+      // 命中的前缀加粗，像地址栏那样 —— 用 DOM 拼，绝不拼 HTML 字符串
+      var q = input.value.trim();
+      var at = q ? it.text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+      if (at >= 0) {
+        txt.appendChild(document.createTextNode(it.text.slice(0, at)));
+        var m = document.createElement('span');
+        m.className = 'mark';
+        m.textContent = it.text.slice(at, at + q.length);
+        txt.appendChild(m);
+        txt.appendChild(document.createTextNode(it.text.slice(at + q.length)));
+      } else {
+        txt.textContent = it.text;
+      }
+      row.appendChild(txt);
+
+      var kind = document.createElement('span');
+      kind.className = 'kind';
+      kind.textContent = it.kind === 'search' ? (T.searchWith || 'Search') : (it.kind === 'brand' ? T.official : T.goTo);
+      row.appendChild(kind);
+
+      row.addEventListener('mousedown', function (e) { e.preventDefault(); commit(i); });
+      row.addEventListener('mouseenter', function () { select(i); });
+      panel.appendChild(row);
+    });
+    panel.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    omni.classList.add('open');
+  }
+
+  function select(i) {
+    if (!items.length) return;
+    sel = ((i % items.length) + items.length) % items.length;
+    var rows = panel.children;
+    for (var k = 0; k < rows.length; k++) {
+      rows[k].setAttribute('aria-selected', k === sel ? 'true' : 'false');
+      if (k === sel) {
+        input.setAttribute('aria-activedescendant', rows[k].id);
+        rows[k].scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }
+
+  function commit(i) {
+    if (i >= 0 && i < items.length && items[i].url) { open(items[i].url); return; }
+    submit(input.value);
+  }
+
+  function ask(q) {
+    lastQ = q;
+    if (!q) { closePanel(); return; }
+    if (!bridge) { closePanel(); return; }
+    post({ type: 'suggest', q: q });
+  }
+
+  input.addEventListener('input', function () { sel = -1; ask(input.value.trim()); });
+  input.addEventListener('focus', function () { if (input.value.trim()) ask(input.value.trim()); });
+
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') {
+      if (panel.hidden) { ask(input.value.trim()); }
+      if (!panel.hidden) { e.preventDefault(); select(sel + 1); }
+    } else if (e.key === 'ArrowUp') {
+      if (!panel.hidden) { e.preventDefault(); select(sel - 1); }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      commit(sel);
+    } else if (e.key === 'Escape') {
+      // 第一段 Esc 收起面板，再按一次才清空输入 —— 和 Edge 一致
+      if (!panel.hidden) { e.preventDefault(); closePanel(); }
+      else if (input.value) { e.preventDefault(); input.value = ''; closePanel(); }
+      else { input.blur(); }
+    } else if (e.key === 'Tab') {
+      closePanel();
+    }
+  });
+
+  box.addEventListener('submit', function (e) { e.preventDefault(); commit(sel); });
+  document.addEventListener('click', function (e) {
+    if (!omni.contains(e.target)) closePanel();
+  });
+
+  /* ── 快捷入口磁贴 ── */
+  function drawTiles() {
+    tiles.textContent = '';
+    LINKS.forEach(function (l) {
+      var a = document.createElement('a');
+      a.className = 'tile';
+      a.href = l.url;
+      a.setAttribute('role', 'listitem');
+
+      var ico = document.createElement('span');
+      ico.className = 'ico';
+      ico.textContent = l.initials || '\u00B7\u00B7';
+      a.appendChild(ico);
+
+      var t = document.createElement('span');
+      t.className = 'txt';
+      t.textContent = l.title || l.url;
+      a.appendChild(t);
+
+      var x = document.createElement('button');
+      x.className = 'x';
+      x.type = 'button';
+      x.textContent = '\u00D7';
+      x.setAttribute('aria-label', T.removeTile + ': ' + (l.title || l.url));
+      x.addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        post({ type: 'removeLink', url: l.url, title: l.title });
+        say(T.removed.replace('{0}', l.title || l.url));
+      });
+      a.appendChild(x);
+
+      tiles.appendChild(a);
+    });
+
+    var add = document.createElement('button');
+    add.className = 'tile add';
+    add.type = 'button';
+    add.setAttribute('aria-label', T.addTile);
+    var ai = document.createElement('span');
+    ai.className = 'ico'; ai.textContent = '+';
+    var at = document.createElement('span');
+    at.className = 'txt'; at.textContent = T.addTile;
+    add.appendChild(ai); add.appendChild(at);
+    add.addEventListener('click', openDlg);
+    tiles.appendChild(add);
+  }
+
+  /* ── 添加快捷入口 ── */
+  var dlg = document.getElementById('dlg');
+  document.getElementById('dlgTitle').textContent = T.addTitle;
+  document.getElementById('lName').textContent = T.nameLabel;
+  document.getElementById('lUrl').textContent = T.urlLabel;
+  document.getElementById('bCancel').textContent = T.cancel;
+  document.getElementById('bOk').textContent = T.confirm;
+
+  function openDlg() {
+    document.getElementById('fName').value = '';
+    document.getElementById('fUrl').value = 'https://';
+    document.getElementById('err').textContent = '';
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+    document.getElementById('fUrl').focus();
+  }
+  function closeDlg() {
+    if (dlg.close) dlg.close(); else dlg.removeAttribute('open');
+  }
+  document.getElementById('bCancel').addEventListener('click', closeDlg);
+  document.getElementById('bOk').addEventListener('click', function () {
+    var name = document.getElementById('fName').value.trim();
+    var url  = document.getElementById('fUrl').value.trim();
+    var err  = document.getElementById('err');
+    if (!url || url === 'https://') { err.textContent = T.emptyName; document.getElementById('fUrl').focus(); return; }
+    if (!/^https?:\/\/\S+\.\S+/i.test(url)) { err.textContent = T.badUrl; document.getElementById('fUrl').focus(); return; }
+    post({ type: 'addLink', title: name, url: url });
+    closeDlg();
+  });
+
+  /* ── 宿主回包 ── */
+  if (bridge) {
+    bridge.addEventListener('message', function (e) {
+      var m = e.data;
+      if (!m || typeof m !== 'object') return;
+      if (m.type === 'suggest') {
+        if (m.q !== lastQ) return;          // 过期回包直接丢
+        items = m.items || [];
+        sel = items.length ? 0 : -1;
+        if (!items.length) { closePanel(); return; }
+        render();
+        select(0);
+      } else if (m.type === 'links') {
+        LINKS = m.items || [];
+        drawTiles();
+      }
+    });
+  }
+
+  drawTiles();
+  if (!window.location.hash) { try { input.focus(); } catch (e) {} }
+})();
+</script>
+</body>
+</html>

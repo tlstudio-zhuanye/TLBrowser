@@ -7,7 +7,7 @@ namespace TLBrowser;
 internal static class Brand
 {
     public const string AppName = "TL 浏览器";
-    public const string AppVersion = "1.1.1";
+    public const string AppVersion = "1.1.2";
     public const string Company = "TLSTUDIO";
 
     public const string SiteTl = "https://tlstudio.cn";
@@ -73,24 +73,15 @@ internal static class Brand
         }
     }
 
-    /// <summary>品牌首页（新标签页）的落地目录。</summary>
-    public static string HomeDir
-    {
-        get
-        {
-            var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "TLSTUDIO", "TLBrowser", "home");
-            Directory.CreateDirectory(dir);
-            return dir;
-        }
-    }
+    /// <summary>
+    /// 新标签页的地址。
+    /// 注意它**不是磁盘上的文件** —— 主页由 HomePage 在内存里现场生成，
+    /// 经 WebView2 的请求拦截直接喂给内核（见 HomePage / WebTab.InstallHomeHost）。
+    /// 域名用 .invalid（RFC 2606 保留后缀，任何 DNS 都解析不出来），
+    /// 万一拦截器没挂上也不会真的跑到外网。
+    /// </summary>
+    public static string HomeUrl => HomePage.Url;
 
-    public static string HomeFilePath => Path.Combine(HomeDir, "index.html");
-
-    public static string HomeUrl => new Uri(HomeFilePath).AbsoluteUri;
-
-    public const string ResHome = "TLBrowser.assets.home.html";
     public const string ResLogo = "TLBrowser.assets.logo.png";
     public const string ResLogoDoubler = "TLBrowser.assets.logo_doubler.png";
 
@@ -127,27 +118,11 @@ internal static class Brand
     }
 
     /// <summary>
-    /// 首页写盘之后「应该长什么样」。主页守护拿它和磁盘上的文件做逐字节比对，
-    /// 只要被任何程序改过一个字符就会被发现并还原。
+    /// 主页现在由 HomePage 现场生成，这里就是它的内容。
+    /// 主页守护不再比对磁盘文件（磁盘上已经没有首页了），
+    /// 改成校验生成结果里是否仍然是写死的那三个地址。
     /// </summary>
-    public static string ExpectedHomeHtml => ReadTextResource(ResHome);
-
-    /// <summary>把内嵌的首页与 logo 释放到磁盘（每次启动覆盖，保证和程序同版本）。</summary>
-    public static void MaterializeHome()
-    {
-        var html = ExpectedHomeHtml;
-        if (html.Length > 0)
-            File.WriteAllText(HomeFilePath, html, new UTF8Encoding(false));
-        WriteBinaryResource(ResLogo, Path.Combine(HomeDir, "logo.png"));
-    }
-
-    private static void WriteBinaryResource(string resourceName, string target)
-    {
-        using var s = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
-        if (s is null) return;
-        using var fs = new FileStream(target, FileMode.Create, FileAccess.Write, FileShare.Read);
-        s.CopyTo(fs);
-    }
+    public static string ExpectedHomeHtml => HomePage.Build();
 
     /// <summary>
     /// 只认这两个官网（含子域）。主页守护用它当启动参数白名单：

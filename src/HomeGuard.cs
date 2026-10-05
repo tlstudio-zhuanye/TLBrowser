@@ -306,49 +306,57 @@ internal static class HomeGuard
     // ────────────────────────────── 3. 首页文件完整性 ──────────────────────────────
 
     /// <summary>
-    /// 首页是内嵌资源，本该每次启动覆盖写盘。这里在覆盖**之前**先比对一次，
-    /// 好在被外部改过的时候能记录下「谁动过、动了什么」，然后还原。
+    /// 首页内容自检。
+    ///
+    /// 以前首页是落盘到 LOCALAPPDATA 的 index.html，这里拿内嵌资源和它逐字节比对，
+    /// 被别的程序改过一个字就能抓到。现在首页改成**内存里现场生成、不落盘** ——
+    /// 磁盘上根本没有文件，外部程序也就无从下手（比原来更安全）。
+    /// 对应的，检查对象从「磁盘文件」换成「生成器这次的输出」：
+    /// 仍然要求搜索引擎和两个官网地址是写死的，防止我们哪天改代码把它们换掉。
     /// </summary>
-    public static void VerifyHomeFile()
+    public static void VerifyHomeContent()
     {
         try
         {
-            var expected = Brand.ExpectedHomeHtml;
-            if (expected.Length == 0) return;
-
-            var path = Brand.HomeFilePath;
-            if (!File.Exists(path))
-            {
-                File.WriteAllText(path, expected, new UTF8Encoding(false));
-                Log(GuardKind.HomeFile, "index.html", "首页文件缺失，已按内嵌资源重建", true);
-                return;
-            }
-
-            var onDisk = File.ReadAllText(path, Encoding.UTF8);
-            if (string.Equals(onDisk, expected, StringComparison.Ordinal)) return;
-
-            File.WriteAllText(path, expected, new UTF8Encoding(false));
-            Log(GuardKind.HomeFile, "index.html",
-                "首页文件被外部改动过（" + DescribeDiff(onDisk) + "），已还原成内嵌版本", true);
+            if (HomePage.SelfTest(out var detail)) return;
+            Log(GuardKind.HomeFile, "newtab", detail, false);
         }
         catch (Exception ex)
         {
-            Log(GuardKind.HomeFile, "index.html", "自检失败：" + ex.Message, false);
+            Log(GuardKind.HomeFile, "newtab", "自检失败：" + ex.Message, false);
         }
     }
 
-    /// <summary>尽量说清楚「被改了什么」，说不清就退化成内容比对。</summary>
-    private static string DescribeDiff(string onDisk)
+    /// <summary>
+    /// 清掉旧版本留下的废弃数据：以前首页要落盘到 home\index.html，
+    /// 现在改成内存生成，这份文件既是死数据、又会误导"首页被改"的判断，删掉。
+    /// 只删我们自己写过的两个文件（index.html / logo.png），目录空了才移除。
+    /// </summary>
+    public static void CleanupObsoleteHome()
     {
-        var bits = new List<string>();
-        if (!onDisk.Contains(Brand.SearchHostUrl, StringComparison.OrdinalIgnoreCase)) bits.Add("搜索引擎地址");
-        if (!onDisk.Contains(Brand.SiteTl, StringComparison.OrdinalIgnoreCase)) bits.Add("tlstudio.cn 链接");
-        if (!onDisk.Contains(Brand.SiteDoubler, StringComparison.OrdinalIgnoreCase)) bits.Add("tldoublerstudio.cn 链接");
-        if (bits.Count > 0) return string.Join("、", bits) + " 不符";
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "TLSTUDIO", "TLBrowser", "home");
+            if (!Directory.Exists(dir)) return;
 
-        return LooksLikeUrl(onDisk)
-            ? "内容与内嵌版本不一致，且文件里含外部网址"
-            : "内容与内嵌版本不一致";
+            var removed = 0;
+            foreach (var name in new[] { "index.html", "logo.png" })
+            {
+                var f = Path.Combine(dir, name);
+                if (!File.Exists(f)) continue;
+                File.Delete(f);
+                removed++;
+            }
+            if (removed > 0)
+                Log(GuardKind.HomeFile, "newtab",
+                    $"清掉旧版落盘的首页残留 {removed} 个文件（现在主页由内存生成，不再落盘）", false);
+
+            if (!Directory.EnumerateFileSystemEntries(dir).Any())
+                Directory.Delete(dir, recursive: false);
+        }
+        catch { /* 清不掉就算了，不影响使用 */ }
     }
 
     // ────────────────────────────── 4. 系统层面只读检查 ──────────────────────────────
@@ -759,9 +767,16 @@ internal static class HomeGuard
         Run("LooksLikeUrl（判断一段文本里有没有网址）", UrlSamples, LooksLikeUrl);
         Run("IsBrandUrl（启动参数白名单，安全关键）", BrandSamples, Brand.IsBrandUrl);
 
+        // 主页不再落盘，所以自检的是「生成器这次的输出」而不是磁盘文件
+        sb.AppendLine("【新标签页生成内容】");
+        var homeOk = HomePage.SelfTest(out var homeDetail);
+        if (!homeOk) bad++;
+        sb.AppendLine($"  {(homeOk ? "PASS" : "FAIL")}  {homeDetail}");
+        sb.AppendLine();
+
         sb.AppendLine(new string('=', 70));
         sb.AppendLine(bad == 0
-            ? $"全部通过（{UrlSamples.Length + BrandSamples.Length} 条）"
+            ? $"全部通过（{UrlSamples.Length + BrandSamples.Length + 1} 条）"
             : $"失败 {bad} 条");
 
         reportText = sb.ToString();
