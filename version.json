@@ -1,7 +1,7 @@
 {
-  "version": "1.1.1",
-  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.1/TLBrowser.exe",
+  "version": "1.1.2",
+  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.2/TLBrowser.exe",
   "page": "https://tlstudio.cn/llq.html",
-  "notes": "界面中英文一键切换 + 网页整页翻译 + 划词翻译。\n菜单 → 界面语言：简体中文 / English；\n菜单 → 翻译此页：整页交给 Bing 翻译；\n网页里选中文字 → 右键 → 翻译选中的文字。\n主页守护、广告拦截逻辑不变。",
+  "notes": "界面全新：新标签页复刻 Microsoft Edge 的交互，并支持中英文。\n搜索框聚焦后展开成地址栏，带联想（官网 / 书签 / 历史 / 搜索），↑↓ 选择、Enter 直达、Esc 还原；\n快捷入口磁贴可添加、可移除；悬停上浮、焦点环等 Fluent 动效，对齐 Win11；\n界面语言（简体中文 / English）现在**连新标签页一起**当场切换，不用重启。",
   "publishedAt": "2026-10-05"
 }
