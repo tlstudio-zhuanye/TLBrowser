@@ -87,6 +87,33 @@ if (Test-Path $exe) {
 Get-ChildItem -Path $out -Filter "*.xml" -ErrorAction SilentlyContinue |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
 
+# Also drop a version-stamped copy next to the plain one, because the user asked
+# for file names that carry the version (so a downloaded / uploaded file is
+# self-identifying). dist\TLBrowser.exe stays as-is: the release pipeline and the
+# site's download URL both reference that exact name.
+# Version is read from src\Brand.cs so there is a single source of truth.
+if ($rc -eq 0 -and (Test-Path $exe)) {
+    $ver = $null
+    try {
+        $brand = Join-Path $root "src\Brand.cs"
+        $m = Select-String -Path $brand -Pattern 'AppVersion\s*=\s*"([0-9][^"]*)"' |
+             Select-Object -First 1
+        if ($m) { $ver = $m.Matches[0].Groups[1].Value }
+    } catch { }
+    if ($ver) {
+        $stamped = Join-Path $out ("TLBrowser-v" + $ver + ".exe")
+        Copy-Item -Path $exe -Destination $stamped -Force -ErrorAction SilentlyContinue
+        "VERSIONED=$stamped" | Add-Content -Path $log -Encoding UTF8
+        # keep dist tidy: only the current version's stamped copy is useful, and
+        # each one is ~50MB
+        Get-ChildItem -Path $out -Filter "TLBrowser-v*.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne ("TLBrowser-v" + $ver + ".exe") } |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    } else {
+        "VERSIONED=skipped (could not read AppVersion)" | Add-Content -Path $log -Encoding UTF8
+    }
+}
+
 # The Desktop copy is deliberately NOT refreshed by default.
 # The user keeps a build there to test by hand, so an automatic overwrite would
 # swap the file out from under them mid-test. Pass -Desktop to sync it on purpose
