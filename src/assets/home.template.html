@@ -41,6 +41,12 @@
   .omni{animation-delay:60ms}
   .tiles{animation-delay:120ms}
   .hint{animation-delay:180ms}
+  .sites{animation:rise 320ms var(--ease) both;animation-delay:220ms}
+
+  /* 官网两行：刻意做得比磁贴淡，是「兜底入口」不是主视觉 */
+  .sites{margin-top:20px;display:flex;flex-direction:column;gap:5px;align-items:center}
+  .sites a{color:var(--faint);text-decoration:none;font-size:12.5px;padding:2px 6px;border-radius:4px}
+  .sites a:hover,.sites a:focus-visible{color:var(--blue);text-decoration:underline;outline:none}
 
   .logo{width:76px;height:76px;object-fit:contain;user-select:none;-webkit-user-drag:none}
 
@@ -188,6 +194,14 @@
   <nav class="tiles" id="tiles" role="list"></nav>
 
   <p class="hint" id="hint"></p>
+
+  <!-- 两个官网入口写死在模板里，不跟着磁贴走：
+       磁贴是用户可以随便增删的，而「主页上必须有官网直达」是规矩，
+       也顺便让主页自检不再依赖用户的磁贴数据。 -->
+  <nav class="sites" aria-label="TLSTUDIO">
+    <a href="%%SITE_TL%%">tlstudio.cn</a>
+    <a href="%%SITE_DOUBLER%%">tldoublerstudio.cn</a>
+  </nav>
 
   <dialog id="dlg" aria-labelledby="dlgTitle">
     <h2 id="dlgTitle"></h2>

@@ -11,7 +11,19 @@ internal sealed class DownloadItem
     public string FileName { get; set; } = "";
     public string Url { get; set; } = "";
     public string FilePath { get; set; } = "";
-    public string State { get; set; } = "已完成";
+    /// <summary>
+    /// 存机器可读的 key：done / canceled / interrupted。
+    /// v1.1.2 之前落盘的是中文（"已完成"），读取时由 NormalizeState 兼容映射，
+    /// 显示统一交给 Lang.T("dl.state." + StateKey)，这样切英文才不会冒出中文状态。
+    /// </summary>
+    public string State { get; set; } = "done";
+
+    public string StateKey => DownloadStore.NormalizeState(State);
+
+    public string StateText => Lang.T("dl.state." + StateKey);
+
+    public bool IsDone => StateKey == "done";
+
     public long TotalBytes { get; set; }
     public DateTime When { get; set; } = DateTime.Now;
 }
@@ -34,12 +46,15 @@ internal sealed class ActiveDownload
         ? (int)Math.Clamp(BytesReceived * 100L / TotalBytes, 0, 100)
         : -1;
 
-    public string StateText => State switch
+    /// <summary>机器可读的状态 key（done / canceled / interrupted），显示时再翻成当前语言。</summary>
+    public string StateKey => State switch
     {
-        CoreWebView2DownloadState.Completed => "已完成",
-        CoreWebView2DownloadState.Interrupted => "已中断",
-        _ => "下载中"
+        CoreWebView2DownloadState.Completed => "done",
+        CoreWebView2DownloadState.Interrupted => "interrupted",
+        _ => "active"
     };
+
+    public string StateText => Lang.T("dl.state." + StateKey);
 
     public void Cancel()
     {
@@ -66,6 +81,103 @@ internal static class DownloadStore
     public static event Action? Changed;
 
     public static string FilePath => Path.Combine(Brand.AppDataDir, "downloads.json");
+
+    /// <summary>
+    /// 用户自己指定的下载位置，一行路径，纯文本。
+    /// 单独放一个文件而不是塞进 settings.json，是为了让用户出问题时不装任何工具、
+    /// 直接用记事本改回来（跟 adblock_user.txt 一个思路）。
+    /// 文件不存在或为空 = 用系统「下载」文件夹。
+    /// </summary>
+    public static string FolderSettingPath => Path.Combine(Brand.AppDataDir, "download_folder.txt");
+
+    /// <summary>当前生效的下载目录（已保证存在；建不出来就退回系统下载文件夹）。</summary>
+    public static string DownloadFolder
+    {
+        get
+        {
+            var custom = ReadFolderSetting();
+            if (!string.IsNullOrWhiteSpace(custom) && EnsureDir(custom)) return custom;
+            return DownloadsFolder;
+        }
+    }
+
+    /// <summary>用户有没有自己指定过位置（用来决定界面上要不要显示「恢复默认」）。</summary>
+    public static bool IsCustomFolder
+    {
+        get
+        {
+            var custom = ReadFolderSetting();
+            return !string.IsNullOrWhiteSpace(custom);
+        }
+    }
+
+    /// <summary>保存自定义下载位置。传空 / 空白 = 恢复系统「下载」文件夹。</summary>
+    public static void SetDownloadFolder(string? path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                if (File.Exists(FolderSettingPath)) File.Delete(FolderSettingPath);
+            }
+            else
+            {
+                if (!EnsureDir(path))
+                    throw new IOException("cannot create directory: " + path);
+                File.WriteAllText(FolderSettingPath, path.Trim(), new UTF8Encoding(false));
+            }
+        }
+        catch { throw; }
+        Changed?.Invoke();
+    }
+
+    /// <summary>恢复默认的「下载」文件夹。</summary>
+    public static void ResetDownloadFolder() => SetDownloadFolder(null);
+
+    private static string ReadFolderSetting()
+    {
+        try
+        {
+            if (!File.Exists(FolderSettingPath)) return "";
+            return File.ReadAllText(FolderSettingPath, Encoding.UTF8).Trim();
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>目录在就用，不在就建；建不出来返回 false（调用方负责回退）。</summary>
+    private static bool EnsureDir(string path)
+    {
+        try
+        {
+            if (!Directory.Exists(path)) Directory.CreateDirectory(path);
+            return Directory.Exists(path);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// 目标文件已存在就往后加 (1) (2)，避免把同名旧文件覆盖掉。
+    /// 只能在本方法里拼路径，别在调用处手写。
+    /// </summary>
+    public static string UniquePath(string folder, string fileName)
+    {
+        var name = string.IsNullOrWhiteSpace(fileName) ? "download" : fileName.Trim();
+        foreach (var c in Path.GetInvalidFileNameChars())
+            name = name.Replace(c, '_');
+        if (name.Length == 0) name = "download";
+
+        var full = Path.Combine(folder, name);
+        if (!File.Exists(full)) return full;
+
+        var stem = Path.GetFileNameWithoutExtension(name);
+        var ext = Path.GetExtension(name);
+        for (var i = 1; i < 1000; i++)
+        {
+            var candidate = Path.Combine(folder, $"{stem} ({i}){ext}");
+            if (!File.Exists(candidate)) return candidate;
+        }
+        return Path.Combine(folder, $"{stem} ({DateTime.Now:yyyyMMddHHmmss}){ext}");
+    }
 
     /// <summary>系统的「下载」文件夹。找不到就退回用户主目录，总之给个能打开的地方。</summary>
     public static string DownloadsFolder
@@ -180,14 +292,29 @@ internal static class DownloadStore
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// 把落盘的状态统一成机器可读 key。
+    /// 老版本写的是中文，这里一并认下来，免得升级后历史记录变成一堆「-」。
+    /// </summary>
+    public static string NormalizeState(string? raw) => raw switch
+    {
+        "done" => "done",
+        "canceled" => "canceled",
+        "interrupted" => "interrupted",
+        "已完成" => "done",
+        "已取消" => "canceled",
+        "已中断" => "interrupted",
+        _ => "interrupted"
+    };
+
     private static void Record(ActiveDownload d, CoreWebView2DownloadOperation op)
     {
-        var state = "已中断";
+        var state = "interrupted";
         try
         {
-            if (op.State == CoreWebView2DownloadState.Completed) state = "已完成";
-            else if (op.InterruptReason == CoreWebView2DownloadInterruptReason.UserCanceled) state = "已取消";
-            else if (op.InterruptReason == CoreWebView2DownloadInterruptReason.UserShutdown) state = "已取消";
+            if (op.State == CoreWebView2DownloadState.Completed) state = "done";
+            else if (op.InterruptReason == CoreWebView2DownloadInterruptReason.UserCanceled) state = "canceled";
+            else if (op.InterruptReason == CoreWebView2DownloadInterruptReason.UserShutdown) state = "canceled";
         }
         catch { }
 

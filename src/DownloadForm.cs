@@ -19,6 +19,29 @@ internal sealed class DownloadForm : Form
         BackColor = Color.Transparent
     };
 
+    // 切语言时要当场改写这几个控件的文字，所以得留引用
+    private readonly Label _lblActive;
+    private readonly Label _lblHistory;
+    private readonly Label _lblTitle;
+    private readonly Label _folderText = new()
+    {
+        AutoSize = false,
+        AutoEllipsis = true,
+        ForeColor = Brand.TextDim,
+        Font = new Font("Microsoft YaHei UI", 8.75f),
+        TextAlign = ContentAlignment.MiddleLeft,
+        BackColor = Color.Transparent
+    };
+    private readonly PillButton _btnChangeFolder;
+    private readonly PillButton _btnResetFolder;
+
+    private readonly PillButton _btnOpenFile;
+    private readonly PillButton _btnOpenFolder;
+    private readonly PillButton _btnCancel;
+    private readonly PillButton _btnRemove;
+    private readonly PillButton _btnClear;
+    private readonly PillButton _btnClose;
+
     private readonly ListView _lvActive = MakeList(
         (Lang.T("dl.col.file"), 300), (Lang.T("dl.col.size"), 92),
         (Lang.T("dl.col.progress"), 120), (Lang.T("dl.col.source"), 158));
@@ -33,7 +56,7 @@ internal sealed class DownloadForm : Form
 
     public DownloadForm()
     {
-        Text = Brand.AppName + " · 下载";
+        Text = Lang.T("dl.window", Brand.AppName);
         Font = new Font("Microsoft YaHei UI", 9f);
         BackColor = Color.White;
         FormBorderStyle = FormBorderStyle.Sizable;
@@ -52,9 +75,39 @@ internal sealed class DownloadForm : Form
         }
         catch { }
 
+        _lblTitle = new Label
+        {
+            AutoSize = false,
+            Text = Lang.T("dl.title"),
+            Font = new Font("Microsoft YaHei UI", 14f, FontStyle.Bold),
+            ForeColor = Brand.TextMain,
+            BackColor = Color.Transparent,
+            Bounds = new Rectangle(66, 13, 300, 26)
+        };
+
+        _btnChangeFolder = new PillButton(Lang.T("dl.changeFolder"), Brand.Blue, false);
+        _btnChangeFolder.Click += (_, _) => ChangeFolder();
+        _btnResetFolder = new PillButton(Lang.T("dl.resetFolder"), Brand.Blue, false);
+        _btnResetFolder.Click += (_, _) => ResetFolder();
+
+        // 底部按钮也在这里 new：它们是 readonly 字段，只能在构造函数里赋值
+        _btnOpenFile = new PillButton(Lang.T("dl.openFile"), Brand.Blue, true);
+        _btnOpenFile.Click += (_, _) => OpenSelectedFile();
+        _btnOpenFolder = new PillButton(Lang.T("dl.openFolder"), Brand.Blue, false);
+        _btnOpenFolder.Click += (_, _) => OpenSelectedFolder();
+        _btnCancel = new PillButton(Lang.T("dl.cancelSel"), Brand.Purple, false);
+        _btnCancel.Click += (_, _) => CancelSelected();
+        _btnRemove = new PillButton(Lang.T("dl.delete"), Brand.Purple, false);
+        _btnRemove.Click += (_, _) => RemoveSelected();
+        _btnClear = new PillButton(Lang.T("dl.clear"), Brand.Purple, false);
+        _btnClear.Click += (_, _) => ClearHistory();
+        _btnClose = new PillButton(Lang.T("dl.close"), Brand.Blue, false);
+        _btnClose.Click += (_, _) => Close();
+
         var header = BuildHeader();
-        var lblActive = MakeCaption("正在下载");
-        var lblHistory = MakeCaption("下载记录");
+        _lblActive = MakeCaption(Lang.T("dl.active"));
+        _lblHistory = MakeCaption(Lang.T("dl.history"));
+        var folderBar = BuildFolderBar();
         var bar = BuildButtonBar();
 
         _lvActive.Height = 150;
@@ -63,9 +116,10 @@ internal sealed class DownloadForm : Form
         // Dock 按倒序处理，Fill 的先加进来，否则会被 Top/Bottom 挤成 0 高
         Controls.Add(_lvHistory);
         Controls.Add(bar);
-        Controls.Add(lblHistory);
+        Controls.Add(_lblHistory);
         Controls.Add(_lvActive);
-        Controls.Add(lblActive);
+        Controls.Add(_lblActive);
+        Controls.Add(folderBar);
         Controls.Add(header);
 
         DownloadStore.Changed += () => _dirty = true;
@@ -73,6 +127,45 @@ internal sealed class DownloadForm : Form
         _timer.Start();
 
         Reload();
+    }
+
+    /// <summary>
+    /// 切换界面语言时由主窗口调用：本窗口是常驻单例，不重建，
+    /// 所以标题、列头、按钮这些写在构造时的文字必须手动刷一遍。
+    /// </summary>
+    public void ApplyLanguage()
+    {
+        Text = Lang.T("dl.window", Brand.AppName);
+        _lblTitle.Text = Lang.T("dl.title");
+        _lblActive.Text = Lang.T("dl.active");
+        _lblHistory.Text = Lang.T("dl.history");
+
+        SetColumns(_lvActive,
+            Lang.T("dl.col.file"), Lang.T("dl.col.size"),
+            Lang.T("dl.col.progress"), Lang.T("dl.col.source"));
+        SetColumns(_lvHistory,
+            Lang.T("dl.col.file"), Lang.T("dl.col.status"), Lang.T("dl.col.size"),
+            Lang.T("dl.col.time"), Lang.T("dl.col.source"));
+
+        _btnOpenFile.Text = Lang.T("dl.openFile");
+        _btnOpenFolder.Text = Lang.T("dl.openFolder");
+        _btnCancel.Text = Lang.T("dl.cancelSel");
+        _btnRemove.Text = Lang.T("dl.delete");
+        _btnClear.Text = Lang.T("dl.clear");
+        _btnClose.Text = Lang.T("dl.close");
+        _btnChangeFolder.Text = Lang.T("dl.changeFolder");
+        _btnResetFolder.Text = Lang.T("dl.resetFolder");
+
+        // 行里的状态文字、占位行也是按语言生成的，清掉重画
+        _lvActive.Items.Clear();
+        _lvHistory.Items.Clear();
+        Reload();
+    }
+
+    private static void SetColumns(ListView lv, params string[] texts)
+    {
+        for (var i = 0; i < lv.Columns.Count && i < texts.Length; i++)
+            lv.Columns[i].Text = texts[i];
     }
 
     // ────────────────────────────── 构建 ──────────────────────────────
@@ -115,6 +208,73 @@ internal sealed class DownloadForm : Form
         return panel;
     }
 
+    /// <summary>下载位置条：左边显示当前存到哪，右边两个按钮改位置 / 恢复默认。</summary>
+    private Control BuildFolderBar()
+    {
+        var panel = new Panel { Dock = DockStyle.Top, Height = 38, BackColor = Brand.StatusBg };
+        panel.Paint += (_, e) =>
+        {
+            using var pen = new Pen(Brand.ChromeLine, 1f);
+            e.Graphics.DrawLine(pen, 0, panel.Height - 1, panel.Width, panel.Height - 1);
+        };
+
+        panel.Controls.Add(_folderText);
+        panel.Controls.Add(_btnChangeFolder);
+        panel.Controls.Add(_btnResetFolder);
+
+        void Layout()
+        {
+            const int h = 26, y = 6, gap = 8, right = 12;
+            var wChange = 104;
+            var wReset = 88;
+            var xReset = panel.ClientSize.Width - right - wReset;
+            var xChange = xReset - gap - wChange;
+            _btnChangeFolder.SetBounds(xChange, y, wChange, h);
+            _btnResetFolder.SetBounds(xReset, y, wReset, h);
+            var textW = Math.Max(80, xChange - gap - 18);
+            _folderText.SetBounds(18, 0, textW, panel.Height);
+        }
+
+        panel.Resize += (_, _) => Layout();
+        Layout();
+        return panel;
+    }
+
+    /// <summary>换一个文件夹存新下载的文件。只影响之后的下载，已经下好的不动。</summary>
+    private void ChangeFolder()
+    {
+        using var dlg = new FolderBrowserDialog
+        {
+            Description = Lang.T("dl.folderPickDesc"),
+            UseDescriptionForTitle = true,
+            SelectedPath = DownloadStore.DownloadFolder
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+        var picked = dlg.SelectedPath;
+        if (string.IsNullOrWhiteSpace(picked)) return;
+        try
+        {
+            DownloadStore.SetDownloadFolder(picked);
+        }
+        catch
+        {
+            MessageBox.Show(this, Lang.T("dl.folderBad", picked), Brand.AppName,
+                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        _dirty = true;
+        Reload();
+    }
+
+    /// <summary>恢复成系统「下载」文件夹。</summary>
+    private void ResetFolder()
+    {
+        DownloadStore.ResetDownloadFolder();
+        _dirty = true;
+        Reload();
+    }
+
     private static Label MakeCaption(string text) => new()
     {
         Dock = DockStyle.Top,
@@ -155,43 +315,25 @@ internal sealed class DownloadForm : Form
             e.Graphics.DrawLine(pen, 0, 0, panel.Width, 0);
         };
 
-        var openFile = new PillButton(Lang.T("dl.openFile"), Brand.Blue, true);
-        openFile.Click += (_, _) => OpenSelectedFile();
-
-        var openFolder = new PillButton(Lang.T("dl.openFolder"), Brand.Blue, false);
-        openFolder.Click += (_, _) => OpenSelectedFolder();
-
-        var cancel = new PillButton(Lang.T("dl.cancelSel"), Brand.Purple, false);
-        cancel.Click += (_, _) => CancelSelected();
-
-        var remove = new PillButton(Lang.T("dl.delete"), Brand.Purple, false);
-        remove.Click += (_, _) => RemoveSelected();
-
-        var clear = new PillButton(Lang.T("dl.clear"), Brand.Purple, false);
-        clear.Click += (_, _) => ClearHistory();
-
-        var close = new PillButton(Lang.T("dl.close"), Brand.Blue, false);
-        close.Click += (_, _) => Close();
-
-        panel.Controls.Add(openFile);
-        panel.Controls.Add(openFolder);
-        panel.Controls.Add(cancel);
-        panel.Controls.Add(remove);
-        panel.Controls.Add(clear);
-        panel.Controls.Add(close);
+        panel.Controls.Add(_btnOpenFile);
+        panel.Controls.Add(_btnOpenFolder);
+        panel.Controls.Add(_btnCancel);
+        panel.Controls.Add(_btnRemove);
+        panel.Controls.Add(_btnClear);
+        panel.Controls.Add(_btnClose);
 
         panel.Resize += (_, _) =>
         {
             const int y = 13, h = 32;
             var x = 18;
             foreach (var (b, w) in new[] {
-                (openFile, 96), (openFolder, 132), (cancel, 120), (remove, 96), (clear, 96)
+                (_btnOpenFile, 96), (_btnOpenFolder, 132), (_btnCancel, 120), (_btnRemove, 96), (_btnClear, 96)
             })
             {
                 b.SetBounds(x, y, w, h);
                 x += w + 8;
             }
-            close.SetBounds(panel.ClientSize.Width - 92, y, 74, h);
+            _btnClose.SetBounds(panel.ClientSize.Width - 92, y, 74, h);
         };
         return panel;
     }
@@ -205,9 +347,11 @@ internal sealed class DownloadForm : Form
 
         var active = DownloadStore.ActiveCount;
         var hist = DownloadStore.HistoryCount;
-        _status.Text = active > 0
-            ? $"正在下载 {active} 项　·　历史记录 {hist} 条"
-            : $"没有正在进行的下载　·　历史记录 {hist} 条";
+        _status.Text = Lang.T(active > 0 ? "dl.sumActive" : "dl.sumIdle", active, hist);
+
+        var folder = DownloadStore.DownloadFolder;
+        _folderText.Text = Lang.T("dl.folderPrefix") + folder;
+        _btnResetFolder.Enabled = DownloadStore.IsCustomFolder;
     }
 
     private void ReloadActive()
@@ -231,7 +375,7 @@ internal sealed class DownloadForm : Form
         foreach (var d in list) _lvActive.Items.Add(ActiveRow(d));
         if (_lvActive.Items.Count == 0)
         {
-            var idle = new ListViewItem(new[] { "当前没有正在进行的下载", "—", "—", "—" });
+            var idle = new ListViewItem(new[] { Lang.T("dl.idleActive"), "—", "—", "—" });
             idle.ForeColor = Brand.TextDim;
             _lvActive.Items.Add(idle);
         }
@@ -296,16 +440,16 @@ internal sealed class DownloadForm : Form
         var item = new ListViewItem(new[]
         {
             d.FileName,
-            d.State,
+            d.StateText,
             FormatSize(d.TotalBytes),
             d.When.ToString("MM-dd HH:mm"),
             ShortHost(d.Url)
         })
         {
             Tag = d,
-            ForeColor = d.State == "已完成" ? Brand.TextMain : Brand.TextDim
+            ForeColor = d.IsDone ? Brand.TextMain : Brand.TextDim
         };
-        item.SubItems[1].ForeColor = d.State == "已完成"
+        item.SubItems[1].ForeColor = d.IsDone
             ? Color.FromArgb(0x1B, 0x8A, 0x4B)
             : Brand.TextDim;
         item.ToolTipText = d.Url + "\n" + d.FilePath;

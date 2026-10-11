@@ -27,6 +27,10 @@ internal static class Program
         if (args.Any(a => a.Equals("--blocktest", StringComparison.OrdinalIgnoreCase)))
             return RunBlockTest();
 
+        // 企业模式 / 下载位置的判定样本。同样写报告、用退出码表示失败条数。
+        if (args.Any(a => a.Equals("--kiosktest", StringComparison.OrdinalIgnoreCase)))
+            return RunKioskTest();
+
         // 启动参数先过主页守护的白名单。往快捷方式里追加网址是外部程序改主页最常用的手法，
         // 白名单之外的参数在这里就被丢掉，起始页永远是本站首页。
         var startUrl = HomeGuard.GateStartUrl(args, out var dual, out var noSplash, out var openGuard);
@@ -156,6 +160,114 @@ internal static class Program
         try
         {
             File.WriteAllText(Path.Combine(Brand.AppDataDir, "blocktest.txt"),
+                sb.ToString(), new UTF8Encoding(false));
+        }
+        catch { }
+
+        return bad;
+    }
+
+    /// <summary>
+    /// 企业模式的放行判定样本。重点是那些「看起来该拦却会被放过」的地址：
+    /// 域名判定一旦写成 Contains，eviltlstudio.cn 就能混过 tlstudio.cn。
+    /// 用纯函数 Kiosk.AllowsWith，不读也不写真实配置。
+    /// </summary>
+    private static readonly (string Url, bool Expect)[] KioskSamples =
+    {
+        // 锁定 tlstudio.cn，同主机放行
+        ("https://tlstudio.cn", true),
+        ("https://tlstudio.cn/about", true),
+        ("http://tlstudio.cn", true),                 // 同主机不同协议
+        ("https://www.tlstudio.cn", true),            // 子域（同主机放行开）
+        ("https://api.tlstudio.cn/x", true),
+        ("https://tldoublerstudio.cn", false),        // 另一个自家站也不行——锁哪个就只能进哪个
+        ("https://eviltlstudio.cn", false),           // 前缀相似
+        ("https://tlstudio.cn.evil.com", false),      // 自家域名当子域骗
+        ("https://hao.360.cn", false),
+        ("https://www.baidu.com", false),
+        ("about:blank", true),                        // 内部页不算跑出去
+        ("https://tlstudio.invalid/newtab", true),    // 新标签页
+        ("file:///C:/x.html", false),
+        ("", false),
+    };
+
+    /// <summary>--kiosktest：跑企业模式判定样本，报告写 kiosktest.txt，退出码 = 失败条数。</summary>
+    private static int RunKioskTest()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("TL 浏览器 · 企业模式判定自检");
+        sb.AppendLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        sb.AppendLine(new string('=', 70));
+        sb.AppendLine();
+
+        var bad = 0;
+
+        sb.AppendLine("A. 锁定 https://tlstudio.cn（同主机放行）");
+        foreach (var (url, expect) in KioskSamples)
+        {
+            var got = Kiosk.AllowsWith(url, "https://tlstudio.cn", true);
+            var ok = got == expect;
+            if (!ok) bad++;
+            sb.AppendLine($"  [{(ok ? "PASS" : "FAIL")}] 期望={(expect ? "放行" : "拦下")} " +
+                          $"实际={(got ? "放行" : "拦下")}  {(url.Length == 0 ? "（空）" : url)}");
+        }
+        sb.AppendLine();
+
+        // 关掉「同主机放行」后，子域也必须被拦——这是严格单页模式
+        sb.AppendLine("B. 锁定 https://tlstudio.cn（严格单主机，不放行子域）");
+        foreach (var (url, expect) in new[] {
+            ("https://tlstudio.cn", true),
+            ("https://tlstudio.cn/a/b?x=1", true),
+            ("https://www.tlstudio.cn", false),
+            ("https://api.tlstudio.cn", false),
+            ("https://eviltlstudio.cn", false),
+        })
+        {
+            var got = Kiosk.AllowsWith(url, "https://tlstudio.cn", false);
+            var ok = got == expect;
+            if (!ok) bad++;
+            sb.AppendLine($"  [{(ok ? "PASS" : "FAIL")}] 期望={(expect ? "放行" : "拦下")} " +
+                          $"实际={(got ? "放行" : "拦下")}  {url}");
+        }
+        sb.AppendLine();
+
+        // 下载位置的同名排队：不能把旧文件覆盖掉
+        sb.AppendLine("C. 下载位置 · 同名文件排队");
+        var dir = Path.Combine(Path.GetTempPath(), "tlb_kiosktest_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(dir);
+            var first = Path.Combine(dir, "a.txt");
+            File.WriteAllText(first, "1");
+            var p1 = DownloadStore.UniquePath(dir, "a.txt");
+            File.WriteAllText(p1, "2");
+            var p2 = DownloadStore.UniquePath(dir, "a.txt");
+            File.WriteAllText(p2, "3");
+            var p3 = DownloadStore.UniquePath(dir, "a.txt");
+
+            var names = new[] { Path.GetFileName(p1), Path.GetFileName(p2), Path.GetFileName(p3) };
+            var ok = names[0] == "a (1).txt" && names[1] == "a (2).txt" && names[2] == "a (3).txt";
+            if (!ok) bad++;
+            sb.AppendLine($"  [{(ok ? "PASS" : "FAIL")}] 同名文件依次排队为 " +
+                          $"{string.Join(" / ", names)}（期望 a (1).txt / a (2).txt / a (3).txt）");
+        }
+        catch (Exception ex)
+        {
+            bad++;
+            sb.AppendLine($"  [FAIL] 排队测试异常：{ex.Message}");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, true); } catch { }
+        }
+        sb.AppendLine();
+
+        sb.AppendLine(new string('=', 70));
+        sb.AppendLine(bad == 0 ? "全部通过" : $"失败 {bad} 条");
+
+        try
+        {
+            File.WriteAllText(Path.Combine(Brand.AppDataDir, "kiosktest.txt"),
                 sb.ToString(), new UTF8Encoding(false));
         }
         catch { }

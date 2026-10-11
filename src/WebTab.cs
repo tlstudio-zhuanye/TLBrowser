@@ -84,7 +84,7 @@ internal abstract class WebTab : UserControl
 
     public void Navigate(string url)
     {
-        if (url == Brand.HomeUrl) { GoHome(); return; }
+        if (url == Brand.StartUrl || url == Brand.HomeUrl) { GoHome(); return; }
         ActiveView?.CoreWebView2?.Navigate(url);
     }
 
@@ -195,6 +195,16 @@ internal abstract class WebTab : UserControl
             {
                 e.Cancel = true;
                 AskExternal(e.Uri);
+                return;
+            }
+
+            // 企业模式：只允许待在锁定页（同主机默认放行，免得页面里的
+            // 登录跳转被自己人拦掉）。跑出去的一律取消，不弹框、不记历史。
+            if (!Kiosk.Allows(e.Uri))
+            {
+                e.Cancel = true;
+                StatusText = Lang.T("kiosk.blocked");
+                RaiseChanged();
                 return;
             }
 
@@ -695,18 +705,22 @@ internal abstract class WebTab : UserControl
                 if (string.IsNullOrEmpty(name)) name = Path.GetFileName(uri);
                 if (string.IsNullOrEmpty(name)) name = Lang.T("dl.unknownFile");
 
+                // 落到用户指定的位置（没指定就是系统「下载」文件夹），同名自动往后排
+                var folder = DownloadStore.DownloadFolder;
+                var target = DownloadStore.UniquePath(folder, name);
+
                 if (Safety.ConfirmDownload)
                 {
                     var answer = MessageBox.Show(
-                        $"文件名：{name}\n来源：{Safety.HostOf(uri)}\n\n" +
-                        "将保存到系统的「下载」文件夹，进度可在下载面板里查看。\n只下载你自己要的东西。确定下载吗？",
-                        Brand.AppName + " · 下载确认",
+                        Lang.T("dl.confirmBody", name, Safety.HostOf(uri), folder),
+                        Lang.T("dl.confirmTitle", Brand.AppName),
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
 
                     if (answer != DialogResult.Yes) { e.Cancel = true; return; }
                 }
 
                 // 接管：不显示 WebView2 默认的「另存为」，统一走下载面板
+                e.ResultFilePath = target;
                 e.Handled = true;
 
                 if (op is not null)
@@ -833,7 +847,7 @@ internal sealed class PageTab : WebTab
         Views.Add(_view);
     }
 
-    public override void GoHome() => _view.CoreWebView2?.Navigate(Brand.HomeUrl);
+    public override void GoHome() => _view.CoreWebView2?.Navigate(Brand.StartUrl);
 }
 
 /// <summary>招牌功能：一个标签里左右并排 TL 工作室 + TL Doubler Studio。</summary>

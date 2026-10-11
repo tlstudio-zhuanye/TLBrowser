@@ -11,7 +11,11 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $proj = Join-Path $root "src\TLBrowser.csproj"
 $out  = Join-Path $root "dist"
-$log  = Join-Path $root "_publish.log"
+# Keep build logs out of the repo root: the root should only hold things a
+# human needs to see, and this file is rewritten on every build.
+$logDir = Join-Path $root "logs"
+if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
+$log  = Join-Path $logDir "publish.log"
 
 $dotnet = "C:\Program Files\dotnet\dotnet.exe"
 if (-not (Test-Path $dotnet)) { $dotnet = "dotnet" }

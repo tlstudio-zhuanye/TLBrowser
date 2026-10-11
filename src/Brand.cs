@@ -7,7 +7,7 @@ namespace TLBrowser;
 internal static class Brand
 {
     public const string AppName = "TL 浏览器";
-    public const string AppVersion = "1.1.2";
+    public const string AppVersion = "1.1.3";
     public const string Company = "TLSTUDIO";
 
     public const string SiteTl = "https://tlstudio.cn";
@@ -81,6 +81,14 @@ internal static class Brand
     /// 万一拦截器没挂上也不会真的跑到外网。
     /// </summary>
     public static string HomeUrl => HomePage.Url;
+
+    /// <summary>
+    /// 主页按钮 / 新标签页 / 启动时真正打开的页面。
+    /// 企业模式下是锁定页，否则就是新标签页。
+    /// 注意别和 HomeUrl 混：HomeUrl 是新标签页那个虚拟地址，
+    /// 主页守护拿它做比对，永远不该被企业模式改写。
+    /// </summary>
+    public static string StartUrl => Kiosk.Enabled ? Kiosk.Url : HomeUrl;
 
     public const string ResLogo = "TLBrowser.assets.logo.png";
     public const string ResLogoDoubler = "TLBrowser.assets.logo_doubler.png";

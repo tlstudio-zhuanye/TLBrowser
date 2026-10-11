@@ -536,6 +536,28 @@ internal sealed class BrowserForm : Form
         _downloadForm.Activate();
     }
 
+    /// <summary>菜单上标出企业模式是否开着，免得锁上了自己都忘了。</summary>
+    private static string KioskMenuText() =>
+        Kiosk.Enabled ? Lang.T("kiosk.menu") + "  ✓" : Lang.T("kiosk.menu");
+
+    /// <summary>
+    /// 企业模式（单页锁定）设置。
+    /// 开关一旦变化，把所有标签重新导航一次：开启就全部回到锁定页，
+    /// 关闭就回到新标签页，不用重启程序。
+    /// </summary>
+    private void ShowKiosk()
+    {
+        using var dlg = new KioskForm();
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        if (!dlg.SettingsChanged) return;
+
+        foreach (var t in _tabs)
+        {
+            try { t.GoHome(); } catch { }
+        }
+        UpdateShield();
+    }
+
     /// <summary>状态条右侧的下载指示：有正在下的就显示「下载中 N 项」，点开进面板。</summary>
     private void UpdateDownloadLabel()
     {
@@ -933,6 +955,7 @@ internal sealed class BrowserForm : Form
         menu.Items.Add(Menu(Lang.T("menu.devTools"), "F12", () => _current?.OpenDevTools()));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(BuildLanguageMenu());
+        menu.Items.Add(Menu(KioskMenuText(), null, ShowKiosk));
         menu.Items.Add(Menu(GuardMenuText(), null, ShowGuard));
         menu.Items.Add(Menu(UpdateMenuText(), null, UpdateMenuAction));
         menu.Items.Add(Menu(Lang.T("menu.about"), null, ShowAbout));
@@ -1097,6 +1120,12 @@ internal sealed class BrowserForm : Form
         // 工具栏提示写在字段初始化器里，只跑一次，所以切语言时必须手动刷一遍
         // （主菜单是每次弹出时动态构建的，不用管）
         ApplyToolbarTips();
+
+        // 下载面板是常驻单例窗口，开着就当场把标题/列头/按钮刷一遍
+        if (_downloadForm is { IsDisposed: false })
+        {
+            try { _downloadForm.ApplyLanguage(); } catch { }
+        }
 
         // 停在新标签页的标签重新加载一次，网页语言跟着变
         foreach (var t in _tabs)
