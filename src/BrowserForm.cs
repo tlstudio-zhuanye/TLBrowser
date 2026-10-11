@@ -85,6 +85,7 @@ internal sealed class BrowserForm : Form
     private readonly PillButton _btnTl = new("tlstudio.cn", Brand.Blue, true);
     private readonly PillButton _btnDoubler = new("tldoublerstudio.cn", Brand.Purple, true);
     private readonly PillButton _btnDual = new(Lang.T("tab.dualTitle"), Brand.Blue, false);
+    private readonly PillButton _btnSplit = new(Lang.T("split.on"), Brand.Purple, false);
 
     private readonly List<WebTab> _tabs = new();
     private WebTab? _current;
@@ -167,6 +168,7 @@ internal sealed class BrowserForm : Form
         _btnTl.Click += (_, _) => OpenSite(Brand.SiteTl);
         _btnDoubler.Click += (_, _) => OpenSite(Brand.SiteDoubler);
         _btnDual.Click += (_, _) => OpenDualTab();
+        _btnSplit.Click += (_, _) => _ = ToggleSplitAsync();
 
         _addrBar.Input.KeyDown += AddrKeyDown;
 
@@ -200,6 +202,7 @@ internal sealed class BrowserForm : Form
         _toolbar.Controls.Add(_btnTl);
         _toolbar.Controls.Add(_btnDoubler);
         _toolbar.Controls.Add(_btnDual);
+        _toolbar.Controls.Add(_btnSplit);
         _toolbar.Controls.Add(_addrBar);
 
         _chrome.Controls.Add(_toolbar);
@@ -235,6 +238,9 @@ internal sealed class BrowserForm : Form
 
         var w2 = 92;
         right -= w2; _btnDual.SetBounds(right, y, w2, h);
+        right -= 6;
+        var wSplit = 84;
+        right -= wSplit; _btnSplit.SetBounds(right, y, wSplit, h);
         right -= 10;
 
         var addrWidth = Math.Max(140, right - x);
@@ -302,19 +308,27 @@ internal sealed class BrowserForm : Form
 
     // ────────────────────────────── 标签管理 ──────────────────────────────
 
-    private async Task<WebTab?> OpenTabAsync(string? url, bool dual = false)
+    /// <summary>
+    /// 把新建的标签接进主窗口：挂进容器、转发全局快捷键、监听状态变化。
+    /// 打开新标签、分屏变身、分屏收回都走这里，免得三处各写一遍漏掉一笔。
+    /// </summary>
+    private void WireTab(WebTab tab)
     {
-        if (_env is null) return null;
-
-        WebTab tab = dual ? new DualTab() : new PageTab();
         tab.Dock = DockStyle.Fill;
         tab.Visible = false;
         tab.KeyRouter = RouteKey;
         tab.TranslateRequested = OnTranslateRequested;
         tab.Changed += OnTabChanged;
         tab.NewTabRequested += (sender, uri) => { _ = OpenTabAsync(uri); };
-
         _host.Controls.Add(tab);
+    }
+
+    private async Task<WebTab?> OpenTabAsync(string? url, bool dual = false)
+    {
+        if (_env is null) return null;
+
+        WebTab tab = dual ? new DualTab() : new PageTab();
+        WireTab(tab);
         _tabs.Add(tab);
         _tabStrip.Add(tab);
 
@@ -669,6 +683,106 @@ internal sealed class BrowserForm : Form
 
     private void OpenDualTab() => _ = OpenTabAsync(null, dual: true);
 
+    // ────────────────────────────── 分屏 ──────────────────────────────
+
+    /// <summary>
+    /// 当前标签在「单页」和「左右分屏」之间来回切。
+    ///
+    /// 分屏 = 原页面原封不动留在左边，右边开一个新标签页，两边各自独立导航；
+    /// 再点一次就收回单页，留下当时激活（点了标题条/在里面打字）的那一侧。
+    /// 标签本身是「原位变身」的：位置不跳，不新开一个标签占位。
+    /// </summary>
+    private async Task ToggleSplitAsync()
+    {
+        if (_env is null) return;
+
+        if (_current is SplitTab split)
+        {
+            await CollapseSplitAsync(split, split.ActiveUrl);
+            return;
+        }
+
+        if (_current is not PageTab page) return;   // 双站对照是固定的左右官网，不参与变身
+        await SplitPageAsync(page);
+    }
+
+    /// <summary>把单页标签换成左右分屏标签。</summary>
+    private async Task SplitPageAsync(PageTab page)
+    {
+        if (_env is null) return;
+
+        var index = _tabs.IndexOf(page);
+        if (index < 0) return;
+
+        var left = page.CurrentUrl;
+        if (string.IsNullOrEmpty(left)) left = Brand.StartUrl;
+
+        var split = new SplitTab(left, null);
+        WireTab(split);
+        split.CollapseRequested += (s, keepUrl) => { _ = CollapseSplitAsync(s, keepUrl); };
+
+        // 原位替换：标签停在原来的位置，不跳到末尾
+        _tabs[index] = split;
+        _tabStrip.Replace(page, split);
+
+        _host.Controls.Remove(page);
+        _current = null;                       // 旧标签马上要销毁，先别让状态刷新碰到它
+        try { page.Dispose(); } catch { }
+
+        SelectTab(split, focusContent: false);
+
+        try
+        {
+            await split.InitAsync(_env, goHome: false);
+            split.NavigateInitial();
+        }
+        catch (Exception ex)
+        {
+            _statusText.Text = Lang.T("status.initFailed", ex.Message);
+        }
+
+        UpdateChrome();
+        split.FocusContent();
+    }
+
+    /// <summary>
+    /// 收起分屏：留下的那一侧升格成普通标签（还是原来那个位置）。
+    /// keepUrl 为空说明两侧都没东西了，那就回到起始页。
+    /// </summary>
+    private async Task CollapseSplitAsync(SplitTab split, string keepUrl)
+    {
+        if (_env is null) return;
+
+        var index = _tabs.IndexOf(split);
+        if (index < 0) return;
+
+        var page = new PageTab();
+        WireTab(page);
+
+        _tabs[index] = page;
+        _tabStrip.Replace(split, page);
+
+        _host.Controls.Remove(split);
+        _current = null;
+        try { split.Dispose(); } catch { }
+
+        SelectTab(page, focusContent: false);
+
+        try
+        {
+            await page.InitAsync(_env, goHome: false);
+            if (string.IsNullOrEmpty(keepUrl)) page.GoHome();
+            else page.Navigate(keepUrl);
+        }
+        catch (Exception ex)
+        {
+            _statusText.Text = Lang.T("status.initFailed", ex.Message);
+        }
+
+        UpdateChrome();
+        page.FocusContent();
+    }
+
     private void AddrKeyDown(object? sender, KeyEventArgs e)
     {
         // 下拉展开时，上下键归它，别让光标在文本框里跑
@@ -884,6 +998,7 @@ internal sealed class BrowserForm : Form
             case 0x32 when ctrl: OpenSite(Brand.SiteDoubler); return true;            // Ctrl+2
             case 0x33 when ctrl: OpenDualTab(); return true;                          // Ctrl+3
             case 0x44 when ctrl && shift: OpenDualTab(); return true;                 // Ctrl+Shift+D
+            case 0x53 when ctrl && shift: _ = ToggleSplitAsync(); return true;        // Ctrl+Shift+S
             case 0x74: _current?.ReloadOrStop(); return true;                         // F5
             case 0x52 when ctrl: _current?.ReloadOrStop(); return true;               // Ctrl+R
             case 0x7A: ToggleFullScreen(); return true;                               // F11
@@ -1103,6 +1218,22 @@ internal sealed class BrowserForm : Form
         _btnReload.SetTip(Lang.T("tip.reload"));
         _btnHome.SetTip(Lang.T("tip.home"));
         _btnMenu.SetTip(Lang.T("tip.menu"));
+
+        // 「分屏 / 退出分屏」是跟着当前标签变的，语言一换也得重算
+        UpdateSplitButton();
+    }
+
+    /// <summary>分屏按钮跟着当前标签走：分屏中显示「退出分屏」，否则显示「分屏」。</summary>
+    private void UpdateSplitButton()
+    {
+        var on = _current is SplitTab;
+        var text = on ? Lang.T("split.off") : Lang.T("split.on");
+        if (_btnSplit.Text != text)
+        {
+            _btnSplit.Text = text;
+            _btnSplit.Invalidate();
+        }
+        _btnSplit.Tip = on ? Lang.T("menu.splitOff") : Lang.T("menu.splitOn");
     }
 
     /// <summary>
@@ -1198,10 +1329,27 @@ internal sealed class BrowserForm : Form
         menu.Items.Add(Menu(Lang.T("tab.close"), "Ctrl+W", () => CloseTab(tab)));
         menu.Items.Add(Menu(Lang.T("tab.closeOthers"), null, () => CloseOtherTabs(tab)));
         menu.Items.Add(Menu(Lang.T("tab.closeRight"), null, () => CloseTabsToRight(tab)));
+        menu.Items.Add(new ToolStripSeparator());
         if (tab is DualTab dual)
         {
-            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(Menu(Lang.T("dual.swap"), null, dual.SwapSides));
+        }
+        else if (tab is SplitTab splitTab)
+        {
+            menu.Items.Add(Menu(Lang.T("dual.swap"), null, splitTab.SwapSides));
+            menu.Items.Add(Menu(Lang.T("menu.splitOff"), null, () =>
+            {
+                SelectTab(splitTab, false);
+                _ = CollapseSplitAsync(splitTab, splitTab.ActiveUrl);
+            }));
+        }
+        else
+        {
+            menu.Items.Add(Menu(Lang.T("menu.splitOn"), null, () =>
+            {
+                SelectTab(tab, false);
+                _ = ToggleSplitAsync();
+            }));
         }
         menu.Show(Cursor.Position);
     }

@@ -72,6 +72,7 @@ internal abstract class WebTab : UserControl
             await view.EnsureCoreWebView2Async(env);
             ConfigureCore(view.CoreWebView2!);
             Hook(view);
+            OnCoreReady(view);
         }
         ActiveView = Views[0];
         ZoomFactor = ActiveView.ZoomFactor;
@@ -79,6 +80,12 @@ internal abstract class WebTab : UserControl
         if (goHome) GoHome();
         RaiseChanged();
     }
+
+    /// <summary>
+    /// 内核就绪之后的额外接线。基类不需要，多视图标签（分屏）靠它给自己的
+    /// 每一侧挂标题更新之类的事件 —— 这些事件必须等 CoreWebView2 存在才能挂。
+    /// </summary>
+    protected virtual void OnCoreReady(WebView2 view) { }
 
     public abstract void GoHome();
 
@@ -820,7 +827,7 @@ internal abstract class WebTab : UserControl
         try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); } catch { }
     }
 
-    private static string SafeHost(string uri)
+    protected static string SafeHost(string uri)
     {
         try { return new Uri(uri).Host; } catch { return uri; }
     }
@@ -981,5 +988,263 @@ internal sealed class DualTab : WebTab
             : Color.White;
         foreach (Control c in panel.Controls)
             if (c is Label l) l.ForeColor = active ? Brand.TextMain : Brand.TextDim;
+    }
+}
+
+/// <summary>
+/// 通用分屏：一个标签里左右并排任意两个页面（跟「双站对照」的区别是
+/// 两个地址都能随便导航）。地址栏、前进后退、刷新、缩放都作用于**激活的那一侧**，
+/// 点某一侧的标题条就切过去。
+///
+/// 关掉一侧 = 分屏结束，剩下的那侧升格成普通标签（由主窗口负责替换，
+/// 见 CollapseRequested）。
+/// </summary>
+internal sealed class SplitTab : WebTab
+{
+    private readonly string? _leftStart;
+    private readonly string? _rightStart;
+
+    private SplitContainer? _split;
+    private WebView2 _left = null!;
+    private WebView2 _right = null!;
+    private Panel _leftHeader = null!;
+    private Panel _rightHeader = null!;
+    private Label _leftLabel = null!;
+    private Label _rightLabel = null!;
+    private bool _adjusting;
+    private bool _collapsing;
+
+    public override bool IsDual => true;
+
+    /// <summary>某一侧被关掉了。参数：要留下的那个地址（主窗口据此换回单页标签）。</summary>
+    public event Action<SplitTab, string>? CollapseRequested;
+
+    public SplitTab(string? leftUrl, string? rightUrl)
+    {
+        _leftStart = leftUrl;
+        _rightStart = rightUrl;
+        Title = Lang.T("tab.splitTitle");
+    }
+
+    protected override void BuildViews()
+    {
+        _split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Vertical,
+            SplitterWidth = 6,
+            BackColor = Brand.ChromeLine
+        };
+
+        _left = new WebView2 { Dock = DockStyle.Fill };
+        _right = new WebView2 { Dock = DockStyle.Fill };
+
+        _leftLabel = new Label();
+        _rightLabel = new Label();
+        _leftHeader = MakeHeader(_leftLabel, Brand.Blue, () => CloseSide(_left));
+        _rightHeader = MakeHeader(_rightLabel, Brand.Purple, () => CloseSide(_right));
+
+        _split.Panel1.Controls.Add(_left);
+        _split.Panel1.Controls.Add(_leftHeader);
+        _split.Panel2.Controls.Add(_right);
+        _split.Panel2.Controls.Add(_rightHeader);
+
+        _leftHeader.Click += (_, _) => ActivateSide(_left);
+        _rightHeader.Click += (_, _) => ActivateSide(_right);
+
+        Controls.Add(_split);
+        Views.Add(_left);
+        Views.Add(_right);
+
+        _split.SizeChanged += (_, _) => ApplySplit();
+        ApplySplit();
+    }
+
+    public override void GoHome() => ActiveView?.CoreWebView2?.Navigate(Brand.StartUrl);
+
+    /// <summary>非空的初始地址（建标签时若给了就导航过去）。</summary>
+    public string? LeftStart => _leftStart;
+    public string? RightStart => _rightStart;
+
+    /// <summary>当前激活那一侧的地址。取消分屏时保留的就是它。</summary>
+    public string ActiveUrl
+    {
+        get
+        {
+            var u = ActiveView?.CoreWebView2?.Source;
+            if (string.IsNullOrEmpty(u)) u = _left?.CoreWebView2?.Source;
+            if (string.IsNullOrEmpty(u)) u = _right?.CoreWebView2?.Source;
+            return u ?? "";
+        }
+    }
+
+    /// <summary>
+    /// 把构造时给的两侧地址真正导航出去。留空的那一侧开新标签页。
+    /// （InitAsync 传了 goHome:false，所以初始导航必须由调用方显式触发。）
+    /// </summary>
+    public void NavigateInitial()
+    {
+        try
+        {
+            _left.CoreWebView2?.Navigate(string.IsNullOrEmpty(_leftStart) ? Brand.StartUrl : _leftStart!);
+            _right.CoreWebView2?.Navigate(string.IsNullOrEmpty(_rightStart) ? Brand.StartUrl : _rightStart!);
+        }
+        catch { }
+    }
+
+    protected override void OnCoreReady(WebView2 view)
+    {
+        try
+        {
+            var core = view.CoreWebView2!;
+            core.DocumentTitleChanged += (_, _) => RefreshHeaders();
+            core.SourceChanged += (_, _) => RefreshHeaders();
+            core.NavigationCompleted += (_, _) => RefreshHeaders();
+        }
+        catch { }
+        RefreshHeaders();
+    }
+
+    /// <summary>左右互换（两个页面换位置，不重新加载）。</summary>
+    public void SwapSides()
+    {
+        var a = _left.CoreWebView2?.Source;
+        var b = _right.CoreWebView2?.Source;
+        if (a is not null) _right.CoreWebView2?.Navigate(a);
+        if (b is not null) _left.CoreWebView2?.Navigate(b);
+    }
+
+    private void ActivateSide(WebView2 view)
+    {
+        MarkActive(view);
+        try { view.Focus(); } catch { }
+    }
+
+    /// <summary>关掉一侧 → 通知主窗口把这侧收掉。</summary>
+    private void CloseSide(WebView2 view)
+    {
+        if (_collapsing) return;
+
+        var keep = ReferenceEquals(view, _left) ? _right : _left;
+        var keepUrl = keep.CoreWebView2?.Source ?? "";
+
+        // 两侧都空就没得收了，直接回到起始页
+        if (string.IsNullOrEmpty(keepUrl)) keepUrl = Brand.StartUrl;
+
+        _collapsing = true;
+        try { CollapseRequested?.Invoke(this, keepUrl); }
+        finally { _collapsing = false; }
+    }
+
+    protected override void UpdateActiveIndicators()
+    {
+        if (_leftHeader is null || _rightHeader is null) return;
+        PaintHeader(_leftHeader, Brand.Blue, ReferenceEquals(ActiveView, _left));
+        PaintHeader(_rightHeader, Brand.Purple, ReferenceEquals(ActiveView, _right));
+    }
+
+    /// <summary>标题条文字 = 页面标题（拿不到就退回域名）。</summary>
+    private void RefreshHeaders()
+    {
+        if (_leftLabel is null || _rightLabel is null) return;
+        try
+        {
+            _leftLabel.Text = Describe(_left);
+            _rightLabel.Text = Describe(_right);
+            Title = Lang.T("tab.splitTitle") + " · " + Short(Describe(_left)) + " | " + Short(Describe(_right));
+            RaiseChanged();
+        }
+        catch { }
+    }
+
+    private static string Describe(WebView2 view)
+    {
+        try
+        {
+            var core = view.CoreWebView2;
+            if (core is null) return "";
+            var src = core.Source ?? "";
+            if (IsHomePageUrl(src)) return Lang.T("tab.newTitle");
+            var title = (core.DocumentTitle ?? "").Trim();
+            var host = SafeHost(src);
+            if (string.IsNullOrWhiteSpace(title)) return host;
+            return host.Length > 0 ? host + " — " + title : title;
+        }
+        catch { return ""; }
+    }
+
+    private static string Short(string s) => s.Length > 24 ? s[..24] + "…" : s;
+
+    /// <summary>激活那一侧淡淡的着色，一眼能看出地址栏现在是跟着谁走。</summary>
+    private static void PaintHeader(Panel panel, Color accent, bool active)
+    {
+        try
+        {
+            panel.BackColor = active
+                ? Color.FromArgb((accent.R + 255 * 5) / 6, (accent.G + 255 * 5) / 6, (accent.B + 255 * 5) / 6)
+                : Color.White;
+            foreach (Control c in panel.Controls)
+                if (c is Label l) l.ForeColor = active ? Brand.TextMain : Brand.TextDim;
+        }
+        catch { }
+    }
+
+    private static Panel MakeHeader(Label label, Color accent, Action onClose)
+    {
+        var panel = new Panel { Dock = DockStyle.Top, Height = 30, BackColor = Color.White, Cursor = Cursors.Hand };
+        var bar = new Panel { Dock = DockStyle.Left, Width = 4, BackColor = accent };
+
+        label.Dock = DockStyle.Fill;
+        label.TextAlign = ContentAlignment.MiddleLeft;
+        label.Padding = new Padding(10, 0, 0, 0);
+        label.ForeColor = Brand.TextDim;
+        label.Font = new Font("Microsoft YaHei UI", 9f);
+        label.AutoEllipsis = true;
+        label.Cursor = Cursors.Hand;
+
+        var close = new Label
+        {
+            Dock = DockStyle.Right,
+            Width = 30,
+            Text = "\uE711",                       // Segoe MDL2 的 ✕
+            Font = new Font("Segoe MDL2 Assets", 9f),
+            ForeColor = Brand.TextDim,
+            TextAlign = ContentAlignment.MiddleCenter,
+            Cursor = Cursors.Hand
+        };
+        close.Click += (_, _) => onClose();
+        // 点 ✕ 时别让 header 的 Click 把它当成「激活这一侧」
+        close.MouseEnter += (_, _) => close.ForeColor = Brand.TextMain;
+        close.MouseLeave += (_, _) => close.ForeColor = Brand.TextDim;
+
+        panel.Controls.Add(label);
+        panel.Controls.Add(close);
+        panel.Controls.Add(bar);
+        return panel;
+    }
+
+    private void ApplySplit()
+    {
+        if (_adjusting || _split is null || _split.IsDisposed) return;
+        var w = _split.Width;
+        if (w < 120) return;
+
+        _adjusting = true;
+        try
+        {
+            var min = Math.Min(180, Math.Max(40, w / 3));
+            _split.Panel1MinSize = min;
+            _split.Panel2MinSize = min;
+            var half = (w - _split.SplitterWidth) / 2;
+            _split.SplitterDistance = Math.Max(min, Math.Min(w - min - _split.SplitterWidth, half));
+        }
+        catch { }
+        finally { _adjusting = false; }
+    }
+
+    protected override void OnSizeChanged(EventArgs e)
+    {
+        base.OnSizeChanged(e);
+        ApplySplit();
     }
 }

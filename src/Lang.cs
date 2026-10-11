@@ -21,6 +21,8 @@ internal static class Lang
         // ── 标签与网页内提示 ──
         ["tab.newTitle"] = new[] { "新标签页", "New tab" },
         ["tab.dualTitle"] = new[] { "双站对照", "Side-by-side" },
+        ["tab.splitTitle"] = new[] { "分屏", "Split view" },
+        ["tab.splitClose"] = new[] { "关掉这一侧", "Close this pane" },
         ["tab.opening"] = new[] { "正在打开 {0}", "Opening {0}" },
         ["tab.loadFailed"] = new[] { "加载失败：{0}", "Failed to load: {0}" },
         ["tab.crashed"] = new[] { "页面进程异常（{0}），按 F5 可重试", "Page process crashed ({0}) — press F5 to retry" },
@@ -48,6 +50,8 @@ internal static class Lang
         ["tip.home"] = new[] { "新标签页 (Ctrl+T)", "New tab (Ctrl+T)" },
         ["tip.menu"] = new[] { "菜单", "Menu" },
         ["menu.dual"] = new[] { "双站对照（并排看两个官网）", "Side-by-side (both sites)" },
+        ["menu.splitOn"] = new[] { "分屏（当前页面留左，右边新开一个）", "Split view (current left, new pane right)" },
+        ["menu.splitOff"] = new[] { "取消分屏", "Exit split view" },
         ["menu.openTl"] = new[] { "打开 tlstudio.cn", "Open tlstudio.cn" },
         ["menu.openDoubler"] = new[] { "打开 tldoublerstudio.cn", "Open tldoublerstudio.cn" },
         ["menu.reopen"] = new[] { "恢复刚关闭的标签页", "Reopen closed tab" },

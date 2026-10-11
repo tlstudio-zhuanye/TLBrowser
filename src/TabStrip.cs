@@ -93,6 +93,24 @@ internal sealed class TabStrip : Control
         Invalidate();
     }
 
+    /// <summary>
+    /// 在原位置换掉一个标签。普通标签 ↔ 分屏标签「变身」时用，
+    /// 这样标签不会跳到末尾，用户的视觉位置保持不变。
+    /// </summary>
+    public void Replace(WebTab oldTab, WebTab newTab)
+    {
+        var i = _tabs.IndexOf(oldTab);
+        if (i < 0)
+        {
+            Add(newTab);
+            return;
+        }
+        _tabs[i] = newTab;
+        if (ReferenceEquals(_selected, oldTab)) _selected = newTab;
+        ClampScroll();
+        Invalidate();
+    }
+
     // ────────────────────────────── 布局 ──────────────────────────────
 
     private (int width, int step) Metrics()
