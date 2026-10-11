@@ -1,7 +1,7 @@
 {
-  "version": "1.1.4",
-  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.4/TLBrowser.exe",
+  "version": "1.1.5",
+  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.5/TLBrowser.exe",
   "page": "https://tlstudio.cn/llq.html",
-  "notes": "新增分屏：一个标签里左右并排两个页面。原来那个页面留在左边，右边新开一个，两边各自独立导航，互不影响。\n\n工具栏的「分屏」按钮、菜单里的「分屏」、快捷键 Ctrl+Shift+S 都能切；再点一次收回单页，留下你正在用的那一侧。也可以直接点某一侧标题条右边的 ✕ 关掉它。\n\n变身前后的标签停在原来的位置，不会新开一个标签占位。\n\n另外顺手补齐了几处小地方：分屏按钮和菜单的字样会跟着界面语言走。",
+  "notes": "修一个上版留下的显示问题：工具栏上「分屏」按钮的文字漏了翻译，直接显示成了 split.on 这样的内部代号。现在正常显示「分屏 / 退出分屏」。\n\n顺手还揪出同一类毛病的另一处：标签上右键，那个「收藏此页 / 取消收藏此页」的菜单项从很早之前起也一直在显示内部代号，这次一并修好。\n\n另外新标签页底部的快捷键提示补上了 Ctrl+Shift+S 分屏。\n\n为防止这类「编译器看不见、一跑就露馅」的问题再漏出去，加了一个自动检查脚本，每次发布前会把界面用到的文案逐条比对一遍。",
   "publishedAt": "2026-10-11"
 }
