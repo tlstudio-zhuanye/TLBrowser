@@ -1,7 +1,7 @@
 {
-  "version": "1.1.3",
-  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.3/TLBrowser.exe",
+  "version": "1.1.4",
+  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.4/TLBrowser.exe",
   "page": "https://tlstudio.cn/llq.html",
-  "notes": "下载位置可以自己改了：下载面板新增「更改位置」，新下载的文件存到你指定的文件夹，也能一键恢复默认。\n\n下载面板补齐多语言：切到 English 后，下载面板的标题、列头、按钮、状态说明全部跟着变 —— 之前只有菜单和主页变。\n\n新增企业模式（单页锁定）：可以把浏览器锁定在一个页面，只能进这一个，想改或想关都要管理员密码。密码只存摘要，不存明文。入口在菜单 → 企业模式。\n\n主页下方固定显示两个官网入口，不再受快捷磁贴增删影响。",
+  "notes": "新增分屏：一个标签里左右并排两个页面。原来那个页面留在左边，右边新开一个，两边各自独立导航，互不影响。\n\n工具栏的「分屏」按钮、菜单里的「分屏」、快捷键 Ctrl+Shift+S 都能切；再点一次收回单页，留下你正在用的那一侧。也可以直接点某一侧标题条右边的 ✕ 关掉它。\n\n变身前后的标签停在原来的位置，不会新开一个标签占位。\n\n另外顺手补齐了几处小地方：分屏按钮和菜单的字样会跟着界面语言走。",
   "publishedAt": "2026-10-11"
 }
