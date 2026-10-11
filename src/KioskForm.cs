@@ -1,10 +1,10 @@
 namespace TLBrowser;
 
 /// <summary>
-/// 企业模式设置窗。两种形态：
-///   未启用 —— 填锁定页 + 设管理员密码 → 启用；
-///   已启用 —— 先输密码解锁，才看得见网址、改密码、关闭企业模式。
-/// 密码只在本窗口里出现一次，落盘的是 PBKDF2 摘要（见 Kiosk）。
+/// 企业模式设置窗（网站白名单）。两种形态：
+///   未启用 —— 编名单 + 设管理员密码 → 启用；
+///   已启用 —— 先输密码解锁，才改得动名单、密码，或者关掉企业模式。
+/// 名单第一条是启动页。密码只在本窗口里出现一次，落盘的是 PBKDF2 摘要（见 Kiosk）。
 /// </summary>
 internal sealed class KioskForm : Form
 {
@@ -16,7 +16,7 @@ internal sealed class KioskForm : Form
         BackColor = Color.Transparent
     };
 
-    private readonly Label _lblUrl = new()
+    private readonly Label _lblList = new()
     {
         AutoSize = false,
         Font = new Font("Microsoft YaHei UI", 9f),
@@ -24,9 +24,19 @@ internal sealed class KioskForm : Form
         BackColor = Color.Transparent
     };
 
-    private readonly TextBox _txtUrl = new()
+    private readonly ListBox _lstAllowed = new()
     {
-        Font = new Font("Microsoft YaHei UI", 10f),
+        Font = new Font("Microsoft YaHei UI", 9.5f),
+        BorderStyle = BorderStyle.FixedSingle,
+        BackColor = Color.White,
+        ForeColor = Brand.TextMain,
+        IntegralHeight = false,
+        ScrollAlwaysVisible = true
+    };
+
+    private readonly TextBox _txtAdd = new()
+    {
+        Font = new Font("Microsoft YaHei UI", 9.5f),
         BorderStyle = BorderStyle.FixedSingle
     };
 
@@ -77,6 +87,8 @@ internal sealed class KioskForm : Form
         BackColor = Color.Transparent
     };
 
+    private readonly PillButton _btnAdd;
+    private readonly PillButton _btnRemove;
     private readonly PillButton _btnPrimary;
     private readonly PillButton _btnSecondary;
     private readonly PillButton _btnClose;
@@ -94,7 +106,7 @@ internal sealed class KioskForm : Form
         BackColor = Color.White;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(580, 400);
+        ClientSize = new Size(620, 540);
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
@@ -109,6 +121,12 @@ internal sealed class KioskForm : Form
         }
         catch { }
 
+        _btnAdd = new PillButton(Lang.T("kiosk.add"), Brand.Blue, false);
+        _btnAdd.Click += (_, _) => AddSite();
+
+        _btnRemove = new PillButton(Lang.T("kiosk.remove"), Brand.Purple, false);
+        _btnRemove.Click += (_, _) => RemoveSite();
+
         _btnPrimary = new PillButton("", Brand.Blue, true);
         _btnPrimary.Click += (_, _) => Primary();
 
@@ -118,6 +136,14 @@ internal sealed class KioskForm : Form
         _btnClose = new PillButton(Lang.T("kiosk.cancel"), Brand.Blue, false);
         _btnClose.Click += (_, _) => Close();
 
+        // 输入框里按回车就当点「添加」，省得每次去够鼠标
+        _txtAdd.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Enter) return;
+            e.SuppressKeyPress = true;
+            AddSite();
+        };
+
         var title = new Label
         {
             AutoSize = false,
@@ -125,13 +151,16 @@ internal sealed class KioskForm : Form
             Font = new Font("Microsoft YaHei UI", 14f, FontStyle.Bold),
             ForeColor = Brand.TextMain,
             BackColor = Color.Transparent,
-            Bounds = new Rectangle(22, 18, 400, 28)
+            Bounds = new Rectangle(22, 18, 520, 28)
         };
 
         Controls.Add(title);
         Controls.Add(_lblState);
-        Controls.Add(_lblUrl);
-        Controls.Add(_txtUrl);
+        Controls.Add(_lblList);
+        Controls.Add(_lstAllowed);
+        Controls.Add(_txtAdd);
+        Controls.Add(_btnAdd);
+        Controls.Add(_btnRemove);
         Controls.Add(_lblPass);
         Controls.Add(_txtPass);
         Controls.Add(_lblPass2);
@@ -141,6 +170,9 @@ internal sealed class KioskForm : Form
         Controls.Add(_btnPrimary);
         Controls.Add(_btnSecondary);
         Controls.Add(_btnClose);
+
+        // 已有配置先灌进名单（未启用时 Kiosk.Allowed 是空的，名单就是个草稿本）
+        foreach (var s in Kiosk.Allowed) _lstAllowed.Items.Add(s);
 
         Layout();
         RefreshState();
@@ -152,35 +184,46 @@ internal sealed class KioskForm : Form
         const int left = 22;
         var fieldW = w - left * 2;
 
-        _lblState.SetBounds(left, 50, fieldW, 20);
-        _lblUrl.SetBounds(left, 86, fieldW, 18);
-        _txtUrl.SetBounds(left, 106, fieldW, 30);
-        _lblPass.SetBounds(left, 150, fieldW, 18);
-        _txtPass.SetBounds(left, 170, (fieldW - 14) / 2, 30);
-        _lblPass2.SetBounds(left + (fieldW - 14) / 2 + 14, 150, (fieldW - 14) / 2, 18);
-        _txtPass2.SetBounds(left + (fieldW - 14) / 2 + 14, 170, (fieldW - 14) / 2, 30);
-        _chkSameHost.SetBounds(left, 214, fieldW, 22);
-        _lblHint.SetBounds(left, 244, fieldW, 48);
+        _lblState.SetBounds(left, 52, fieldW, 34);
+        _lblList.SetBounds(left, 94, fieldW, 18);
+        _lstAllowed.SetBounds(left, 114, fieldW, 156);
 
-        const int bh = 32, by = 312;
+        const int rowY = 278, rowH = 30, btnW = 80;
+        _btnRemove.SetBounds(left + fieldW - btnW, rowY, btnW, rowH);
+        _btnAdd.SetBounds(left + fieldW - btnW - 8 - 68, rowY, 68, rowH);
+        _txtAdd.SetBounds(left, rowY, fieldW - btnW - 8 - 68 - 8, rowH);
+
+        var half = (fieldW - 14) / 2;
+        _lblPass.SetBounds(left, 322, half, 18);
+        _lblPass2.SetBounds(left + half + 14, 322, half, 18);
+        _txtPass.SetBounds(left, 342, half, 30);
+        _txtPass2.SetBounds(left + half + 14, 342, half, 30);
+
+        _chkSameHost.SetBounds(left, 384, fieldW, 22);
+        _lblHint.SetBounds(left, 412, fieldW, 52);
+
+        const int bh = 32, by = 480;
         _btnPrimary.SetBounds(left, by, 132, bh);
         _btnSecondary.SetBounds(left + 140, by, 150, bh);
         _btnClose.SetBounds(w - left - 88, by, 88, bh);
     }
 
-    /// <summary>按当前状态决定哪些控件能用、按钮上写什么。</summary>
+    /// <summary>按当前状态决定哪些控件能用、按钮上写什么。名单本身不重建（它是当前的草稿）。</summary>
     private void RefreshState()
     {
         var on = Kiosk.Enabled;
         var locked = on && !_unlocked;
 
-        _lblState.Text = on ? Lang.T("kiosk.stateOn", Kiosk.Url) : Lang.T("kiosk.stateOff");
-        _lblUrl.Text = Lang.T("kiosk.urlLabel");
+        _lblState.Text = on ? Lang.T("kiosk.stateOn", Kiosk.Count) : Lang.T("kiosk.stateOff");
+        _lblList.Text = Lang.T("kiosk.listLabel");
         _chkSameHost.Text = Lang.T("kiosk.sameHost");
         _lblHint.Text = Lang.T("kiosk.hint");
+        _txtAdd.PlaceholderText = Lang.T("kiosk.addHint");
 
-        _txtUrl.Text = on ? Kiosk.Url : "";
-        _txtUrl.Enabled = !locked;
+        _lstAllowed.Enabled = !locked;
+        _txtAdd.Enabled = !locked;
+        _btnAdd.Enabled = !locked;
+        _btnRemove.Enabled = !locked;
         _chkSameHost.Enabled = !locked;
         _chkSameHost.Checked = Kiosk.AllowSameHost;
 
@@ -199,12 +242,57 @@ internal sealed class KioskForm : Form
         _btnSecondary.Visible = on && _unlocked;
     }
 
+    /// <summary>把输入框里的那条加进名单（规范化 + 去重）。</summary>
+    private void AddSite()
+    {
+        if (_txtAdd.Text.Trim().Length == 0) return;
+
+        var url = Kiosk.NormalizeUrl(_txtAdd.Text);
+        if (url.Length == 0)
+        {
+            Warn(Lang.T("kiosk.badUrl"));
+            return;
+        }
+
+        foreach (var o in _lstAllowed.Items)
+            if (string.Equals(o as string, url, StringComparison.OrdinalIgnoreCase))
+            {
+                Warn(Lang.T("kiosk.dupUrl"));
+                return;
+            }
+
+        _lstAllowed.Items.Add(url);
+        _txtAdd.Text = "";
+        _lstAllowed.SelectedIndex = _lstAllowed.Items.Count - 1;
+    }
+
+    private void RemoveSite()
+    {
+        var i = _lstAllowed.SelectedIndex;
+        if (i < 0) return;
+        _lstAllowed.Items.RemoveAt(i);
+        if (_lstAllowed.Items.Count > 0)
+            _lstAllowed.SelectedIndex = Math.Min(i, _lstAllowed.Items.Count - 1);
+    }
+
+    /// <summary>把名单读出来（界面上已经是规范化过的地址了）。</summary>
+    private List<string> Collect()
+    {
+        var list = new List<string>();
+        foreach (var o in _lstAllowed.Items)
+        {
+            var s = o as string ?? "";
+            if (s.Length > 0) list.Add(s);
+        }
+        return list;
+    }
+
     private void Primary()
     {
         if (!Kiosk.Enabled)
         {
-            var url = _txtUrl.Text.Trim();
-            if (url.Length == 0)
+            var sites = Collect();
+            if (sites.Count == 0)
             {
                 Warn(Lang.T("kiosk.needUrl"));
                 return;
@@ -224,7 +312,7 @@ internal sealed class KioskForm : Form
 
             try
             {
-                Kiosk.Enable(url, p1);
+                Kiosk.Enable(sites, p1);
                 Kiosk.SetAllowSameHost(_chkSameHost.Checked);
             }
             catch
@@ -234,7 +322,7 @@ internal sealed class KioskForm : Form
             }
 
             SettingsChanged = true;
-            Info(Lang.T("kiosk.enabled", Kiosk.Url));
+            Info(Lang.T("kiosk.enabled", Kiosk.Count));
             DialogResult = DialogResult.OK;
             Close();
             return;
@@ -253,8 +341,8 @@ internal sealed class KioskForm : Form
         }
 
         // 已解锁 → 保存（密码框留空表示不改密码）
-        var newUrl = _txtUrl.Text.Trim();
-        if (newUrl.Length == 0)
+        var newSites = Collect();
+        if (newSites.Count == 0)
         {
             Warn(Lang.T("kiosk.needUrl"));
             return;
@@ -270,7 +358,7 @@ internal sealed class KioskForm : Form
 
         try
         {
-            Kiosk.SetUrl(newUrl);
+            Kiosk.SetAllowed(newSites);
             Kiosk.SetAllowSameHost(_chkSameHost.Checked);
             if (np1.Length > 0) Kiosk.SetPassword(np1);
         }

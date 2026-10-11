@@ -61,15 +61,34 @@ internal static class HomePage
 
         var json = new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
+        // 企业模式下磁贴直接换成「允许访问的名单」：一是给员工一个内部系统入口，
+        // 二是免得点自家快捷入口反被自己拦下。名单归管理员管，所以同时锁掉增删。
+        var kiosk = Kiosk.Enabled;
+        var tiles = kiosk ? KioskTiles() : Links.Items;
+
         return tpl
             .Replace("%%LANG%%", Lang.T("home.lang"))
             .Replace("%%TITLE%%", Html(Lang.T("home.title")))
             .Replace("%%I18N%%", SafeJson(i18n, json))
-            .Replace("%%LINKS%%", SafeJson(Links.Items, json))
+            .Replace("%%LINKS%%", SafeJson(tiles, json))
+            .Replace("%%TILES_LOCKED%%", kiosk ? "true" : "false")
             .Replace("%%SEARCH%%", Brand.SearchHostUrl)
             .Replace("%%SITE_TL%%", Brand.SiteTl)
             .Replace("%%SITE_DOUBLER%%", Brand.SiteDoubler)
             .Replace("%%VERSION%%", Brand.AppVersion);
+    }
+
+    /// <summary>企业模式下的磁贴：拿允许名单当入口，标题就用主机名。</summary>
+    private static List<QuickLink> KioskTiles()
+    {
+        var list = new List<QuickLink>();
+        foreach (var u in Kiosk.Allowed)
+        {
+            var title = u;
+            try { title = new Uri(u).Host; } catch { }
+            list.Add(new QuickLink { Title = title, Url = u });
+        }
+        return list;
     }
 
     /// <summary>模板读不出来时的兜底：宁可简陋，也别白屏。</summary>

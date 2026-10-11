@@ -222,6 +222,7 @@
 (function () {
   var T     = %%I18N%%;
   var LINKS = %%LINKS%%;
+  var LOCKED = %%TILES_LOCKED%%;   /* 企业模式：磁贴就是允许访问的名单，不给增删 */
   var SEARCH = "%%SEARCH%%";
 
   var omni  = document.getElementById('omni');
@@ -401,20 +402,24 @@
       t.textContent = l.title || l.url;
       a.appendChild(t);
 
-      var x = document.createElement('button');
-      x.className = 'x';
-      x.type = 'button';
-      x.textContent = '\u00D7';
-      x.setAttribute('aria-label', T.removeTile + ': ' + (l.title || l.url));
-      x.addEventListener('click', function (e) {
-        e.preventDefault(); e.stopPropagation();
-        post({ type: 'removeLink', url: l.url, title: l.title });
-        say(T.removed.replace('{0}', l.title || l.url));
-      });
-      a.appendChild(x);
+      if (!LOCKED) {
+        var x = document.createElement('button');
+        x.className = 'x';
+        x.type = 'button';
+        x.textContent = '\u00D7';
+        x.setAttribute('aria-label', T.removeTile + ': ' + (l.title || l.url));
+        x.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          post({ type: 'removeLink', url: l.url, title: l.title });
+          say(T.removed.replace('{0}', l.title || l.url));
+        });
+        a.appendChild(x);
+      }
 
       tiles.appendChild(a);
     });
+
+    if (LOCKED) return;   /* 名单由管理员维护，磁贴不给加 */
 
     var add = document.createElement('button');
     add.className = 'tile add';

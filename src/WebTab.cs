@@ -95,6 +95,13 @@ internal abstract class WebTab : UserControl
         ActiveView?.CoreWebView2?.Navigate(url);
     }
 
+    /// <summary>
+    /// 不分青红皂白，直接导到给定地址（不做「主页就转 GoHome」那层重定向）。
+    /// 给企业模式里的「新标签页」用：那时 Brand.StartUrl 指的是名单第一条，
+    /// 走 Navigate 会被重定向到名单第一条去，入口页就永远到不了了。
+    /// </summary>
+    public void NavigateExact(string url) => ActiveView?.CoreWebView2?.Navigate(url);
+
     public void GoBack()
     {
         var c = ActiveView?.CoreWebView2;

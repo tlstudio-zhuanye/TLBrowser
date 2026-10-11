@@ -290,7 +290,8 @@ internal sealed class BrowserForm : Form
 
         try
         {
-            await OpenTabAsync(_startUrl, dual: _startDual);
+            // 没给启动参数就按 Brand.StartUrl 走（企业模式下 = 名单第一条）
+            await OpenTabAsync(_startUrl ?? Brand.StartUrl, dual: _startDual);
         }
         catch (Exception ex)
         {
@@ -334,9 +335,26 @@ internal sealed class BrowserForm : Form
 
         SelectTab(tab, focusContent: false);
 
-        await tab.InitAsync(_env, goHome: string.IsNullOrEmpty(url));
-
-        if (!string.IsNullOrEmpty(url)) tab.Navigate(url);
+        if (dual)
+        {
+            // 双站对照有自己的 GoHome（左右两个官网），照旧
+            var goHome = string.IsNullOrEmpty(url);
+            await tab.InitAsync(_env, goHome: goHome);
+            if (!goHome) tab.Navigate(url!);
+        }
+        else if (string.IsNullOrEmpty(url))
+        {
+            // 「新标签页」就是新标签页本身。企业模式下它是允许名单的入口页，
+            // 所以这里必须 NavigateExact —— 走 GoHome/Navigate 会被转到
+            // Brand.StartUrl（名单第一条），员工就没有切换内部系统的入口了。
+            await tab.InitAsync(_env, goHome: false);
+            tab.NavigateExact(Brand.HomeUrl);
+        }
+        else
+        {
+            await tab.InitAsync(_env, goHome: false);
+            tab.Navigate(url);
+        }
 
         UpdateChrome();
         if (!dual) tab.FocusContent();
@@ -555,8 +573,8 @@ internal sealed class BrowserForm : Form
         Kiosk.Enabled ? Lang.T("kiosk.menu") + "  ✓" : Lang.T("kiosk.menu");
 
     /// <summary>
-    /// 企业模式（单页锁定）设置。
-    /// 开关一旦变化，把所有标签重新导航一次：开启就全部回到锁定页，
+    /// 企业模式（网站白名单）设置。
+    /// 开关一旦变化，把所有标签重新导航一次：开启就全部回到启动页，
     /// 关闭就回到新标签页，不用重启程序。
     /// </summary>
     private void ShowKiosk()

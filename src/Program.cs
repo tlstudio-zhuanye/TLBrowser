@@ -168,24 +168,44 @@ internal static class Program
     }
 
     /// <summary>
+    /// 企业模式（网站白名单）里那份「允许访问的网站」，自测用。
+    /// 特意混了域名、带非标端口的 IP、以及只加了一半的自家站
+    /// —— 这三类最容易在匹配逻辑里写错。
+    /// </summary>
+    private static readonly string[] KioskAllowed =
+    {
+        "https://oa.tlstudio.cn/",     // 第一条 = 启动页
+        "http://10.0.0.5:8080/",       // 内网系统：IP + 非标端口
+        "https://tlstudio.cn/",        // 官网（子域一起放行）
+    };
+
+    /// <summary>
     /// 企业模式的放行判定样本。重点是那些「看起来该拦却会被放过」的地址：
-    /// 域名判定一旦写成 Contains，eviltlstudio.cn 就能混过 tlstudio.cn。
-    /// 用纯函数 Kiosk.AllowsWith，不读也不写真实配置。
+    /// 域名判定一旦写成 Contains，eviltlstudio.cn 就能混过 tlstudio.cn；
+    /// 子域放行必须是单向的 —— 填 oa.tlstudio.cn 不能把整个 tlstudio.cn 都放进来。
+    /// 用纯函数 Kiosk.AllowsUrl，不读也不写真实配置。
     /// </summary>
     private static readonly (string Url, bool Expect)[] KioskSamples =
     {
-        // 锁定 tlstudio.cn，同主机放行
-        ("https://tlstudio.cn", true),
+        // 名单里的站
+        ("https://oa.tlstudio.cn/", true),
+        ("https://oa.tlstudio.cn/login?u=1", true),
+        ("https://mail.tlstudio.cn/", true),          // tlstudio.cn 的子域
         ("https://tlstudio.cn/about", true),
-        ("http://tlstudio.cn", true),                 // 同主机不同协议
-        ("https://www.tlstudio.cn", true),            // 子域（同主机放行开）
-        ("https://api.tlstudio.cn/x", true),
-        ("https://tldoublerstudio.cn", false),        // 另一个自家站也不行——锁哪个就只能进哪个
+        ("http://10.0.0.5:8080/erp", true),
+        ("https://10.0.0.5:8080/", true),             // 协议不参与判定
+        ("https://OA.TLSTUDIO.CN/", true),            // 大小写不敏感
+        // 名单之外的一律拦下
+        ("http://10.0.0.5:9090/", false),             // 同一个 IP，端口不在名单
+        ("https://tldoublerstudio.cn", false),        // 自家另一个站，没加就不放
         ("https://eviltlstudio.cn", false),           // 前缀相似
-        ("https://tlstudio.cn.evil.com", false),      // 自家域名当子域骗
+        ("https://tlstudio.cn.evil.com", false),      // 拿自家域名当子域骗
+        ("https://oa.tlstudio.cn.evil.com", false),   // 同上，前面还加了个 oa
         ("https://hao.360.cn", false),
         ("https://www.baidu.com", false),
-        ("about:blank", true),                        // 内部页不算跑出去
+        ("https://github.com", false),
+        // 浏览器自己的页面不算「跑出去」
+        ("about:blank", true),
         ("https://tlstudio.invalid/newtab", true),    // 新标签页
         ("file:///C:/x.html", false),
         ("", false),
@@ -202,10 +222,10 @@ internal static class Program
 
         var bad = 0;
 
-        sb.AppendLine("A. 锁定 https://tlstudio.cn（同主机放行）");
+        sb.AppendLine("A. 白名单 3 条（域名 / 带非标端口的 IP / 自家官网），放行子域名");
         foreach (var (url, expect) in KioskSamples)
         {
-            var got = Kiosk.AllowsWith(url, "https://tlstudio.cn", true);
+            var got = Kiosk.AllowsUrl(url, KioskAllowed, true);
             var ok = got == expect;
             if (!ok) bad++;
             sb.AppendLine($"  [{(ok ? "PASS" : "FAIL")}] 期望={(expect ? "放行" : "拦下")} " +
@@ -213,17 +233,17 @@ internal static class Program
         }
         sb.AppendLine();
 
-        // 关掉「同主机放行」后，子域也必须被拦——这是严格单页模式
-        sb.AppendLine("B. 锁定 https://tlstudio.cn（严格单主机，不放行子域）");
+        // 关掉子域放行后，只有名单里写死的那些主机能进（连 mail. 这种子域也拦）
+        sb.AppendLine("B. 同一份名单，但关掉「放行子域名」");
         foreach (var (url, expect) in new[] {
-            ("https://tlstudio.cn", true),
-            ("https://tlstudio.cn/a/b?x=1", true),
-            ("https://www.tlstudio.cn", false),
-            ("https://api.tlstudio.cn", false),
+            ("https://oa.tlstudio.cn/", true),
+            ("https://tlstudio.cn/", true),
+            ("http://10.0.0.5:8080/x", true),
+            ("https://mail.tlstudio.cn/", false),
             ("https://eviltlstudio.cn", false),
         })
         {
-            var got = Kiosk.AllowsWith(url, "https://tlstudio.cn", false);
+            var got = Kiosk.AllowsUrl(url, KioskAllowed, false);
             var ok = got == expect;
             if (!ok) bad++;
             sb.AppendLine($"  [{(ok ? "PASS" : "FAIL")}] 期望={(expect ? "放行" : "拦下")} " +
