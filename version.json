@@ -1,7 +1,7 @@
 {
-  "version": "1.1.5",
-  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.5/TLBrowser.exe",
+  "version": "1.1.6",
+  "url": "https://github.com/tlstudio-zhuanye/TLBrowser/releases/download/v1.1.6/TLBrowser.exe",
   "page": "https://tlstudio.cn/llq.html",
-  "notes": "修一个上版留下的显示问题：工具栏上「分屏」按钮的文字漏了翻译，直接显示成了 split.on 这样的内部代号。现在正常显示「分屏 / 退出分屏」。\n\n顺手还揪出同一类毛病的另一处：标签上右键，那个「收藏此页 / 取消收藏此页」的菜单项从很早之前起也一直在显示内部代号，这次一并修好。\n\n另外新标签页底部的快捷键提示补上了 Ctrl+Shift+S 分屏。\n\n为防止这类「编译器看不见、一跑就露馅」的问题再漏出去，加了一个自动检查脚本，每次发布前会把界面用到的文案逐条比对一遍。",
+  "notes": "企业模式改成了「网站白名单」：不再只锁一个页面，而是给一份允许访问的网站名单 —— 名单里的站随便用，名单之外一律拦住，搜索和外链也一样。\n\n名单的第一条就是启动页，开浏览器直接进它；点「+」新开标签会列出全部允许的网站，员工点一下就能在几个内部系统之间切。\n\n填域名就行（oa.tlstudio.cn、http://10.0.0.5:8080/ 都认），一个域名可以连带放行它的子域名，内网 IP 带端口也支持。改名单、退出企业模式仍然要管理员密码。",
   "publishedAt": "2026-10-11"
 }
