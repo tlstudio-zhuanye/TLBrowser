@@ -331,6 +331,23 @@ def main() -> int:
     log("TL 浏览器 发布 · 版本 %s" % version)
     log("=" * 58)
 
+    # ---- 发布前置闸门：文案 key 对不上编译器不会报，只有跑起来才露馅 ----
+    # v1.1.4 就是这么漏出去的（工具栏按钮上写着 split.on），所以放到最前面拦住。
+    gate = os.path.join(ROOT, "tools", "check_lang_keys.py")
+    if os.path.exists(gate):
+        r = run([sys.executable, gate])
+        if r.returncode != 0:
+            log("")
+            for line in (r.stdout or b"").decode("utf-8", "replace").splitlines():
+                log("  " + line)
+            log("")
+            log("!! 文案 key 检查没过（%d 个问题），先修再发布。" % r.returncode)
+            return 3
+        log("      文案 key 检查通过")
+        log("=" * 58)
+    else:
+        log("      (没找到 tools\\check_lang_keys.py，跳过文案 key 检查)")
+
     # ---- 只推消息：编译 / Release / 上传都不碰，纯粹把公告再刷一遍 ----
     if a.announce_only:
         ann = read_announcement(version)

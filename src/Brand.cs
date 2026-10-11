@@ -7,7 +7,7 @@ namespace TLBrowser;
 internal static class Brand
 {
     public const string AppName = "TL 浏览器";
-    public const string AppVersion = "1.1.4";
+    public const string AppVersion = "1.1.5";
     public const string Company = "TLSTUDIO";
 
     public const string SiteTl = "https://tlstudio.cn";

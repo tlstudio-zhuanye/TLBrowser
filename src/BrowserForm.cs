@@ -1320,7 +1320,7 @@ internal sealed class BrowserForm : Form
             SelectTab(tab, false);
             tab.ToggleMute();
         }));
-        menu.Items.Add(Menu(Bookmarks.Contains(tab.CurrentUrl) ? Lang.T("bm.removeTab") : Lang.T("bm.addTab"), null, () =>
+        menu.Items.Add(Menu(Bookmarks.Contains(tab.CurrentUrl) ? Lang.T("bm.remove") : Lang.T("bm.add"), null, () =>
         {
             SelectTab(tab, false);
             ToggleBookmark();
