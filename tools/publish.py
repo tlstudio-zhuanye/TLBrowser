@@ -217,6 +217,63 @@ def announce(version: str, url: str, notes: str, dry: bool) -> None:
         raise SystemExit("发公告失败 HTTP %s：%s" % (e.code, e.read().decode("utf-8", "replace")[:400]))
 
 
+def post_upcoming(version: str, notes: str, publish_at: str, eta: str, dry: bool) -> None:
+    """推「即将更新」预告。publish_at 传毫秒时间戳或 ISO 串；为空则立刻可见。
+
+    服务端按 publishAt 定时生效：没到点 /tlbrowser/upcoming.json 返回空，
+    到点自动变为可见 —— 不需要再跑一次脚本。
+    """
+    at = 0
+    if publish_at:
+        s = publish_at.strip()
+        if s.isdigit():
+            at = int(s)
+        else:
+            # 交给服务端解析 ISO（Date.parse），这里只做非空校验
+            at = s
+    if dry:
+        log("      [dry] 会 POST %s/admin set_upcoming %s publishAt=%s" % (API, version, at))
+        return
+    payload = {"action": "set_upcoming", "version": version, "notes": notes,
+               "eta": eta, "publishAt": at}
+    req = urllib.request.Request(
+        API + "/admin",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": "Bearer " + ADMIN_TOKEN,
+                 "Content-Type": "application/json; charset=utf-8",
+                 "User-Agent": UA, "Accept": "application/json"},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=40) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        raise SystemExit("发预告失败 HTTP %s：%s" % (e.code, e.read().decode("utf-8", "replace")[:400]))
+    if not data.get("ok"):
+        raise SystemExit("发预告失败：%s" % json.dumps(data, ensure_ascii=False)[:300])
+    up = data.get("upcoming", {})
+    log("      预告已生效：version=%s publishAt=%s" % (up.get("version"), up.get("publishAt")))
+
+
+def clear_upcoming(dry: bool) -> None:
+    """撤掉预告。"""
+    if dry:
+        log("      [dry] 会 POST %s/admin clear_upcoming" % API)
+        return
+    req = urllib.request.Request(
+        API + "/admin",
+        data=json.dumps({"action": "clear_upcoming"}).encode("utf-8"),
+        headers={"Authorization": "Bearer " + ADMIN_TOKEN,
+                 "Content-Type": "application/json; charset=utf-8",
+                 "User-Agent": UA, "Accept": "application/json"},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=40) as r:
+            r.read()
+        log("      预告已撤下")
+    except urllib.error.HTTPError as e:
+        raise SystemExit("撤预告失败 HTTP %s：%s" % (e.code, e.read().decode("utf-8", "replace")[:400]))
+
+
 def push_manifest(version: str, url: str, notes: str, dry: bool) -> None:
     path = "version.json"
     manifest = {"version": version, "url": url, "page": "https://tlstudio.cn/llq.html",
@@ -323,8 +380,34 @@ def main() -> int:
     ap.add_argument("--no-announce", action="store_true", help="不发公告、不动清单")
     ap.add_argument("--announce-only", action="store_true",
                     help="只重新推送更新消息（编译、Release、上传全部跳过）")
+    ap.add_argument("--upcoming", metavar="VERSION",
+                    help="发「即将更新」预告，配合 --at 定时生效；不出包，不改版本号")
+    ap.add_argument("--at", metavar="WHEN", default="",
+                    help="预告生效时间：毫秒时间戳或 ISO（如 2026-10-20T10:00:00+08:00）；留空立即生效")
+    ap.add_argument("--eta", metavar="TEXT", default="",
+                    help="预告里的预计时间文字（可选）")
+    ap.add_argument("--upcoming-note", metavar="TEXT", default="",
+                    help="预告文案；留空则用 _announce.txt")
+    ap.add_argument("--clear-upcoming", action="store_true", help="撤掉预告")
     a = ap.parse_args()
     dry = a.dry_run
+
+    # ---- 预告推送：独立动作，不编译不出包，发完就走 ----
+    if a.clear_upcoming:
+        clear_upcoming(dry)
+        return 0
+    if a.upcoming:
+        note = a.upcoming_note
+        if not note:
+            try:
+                with open(ANN_TXT, encoding="utf-8") as f:
+                    note = f.read().strip()
+            except Exception:
+                note = ""
+        if len(note) > 600:
+            raise SystemExit("预告文案太长了（%d 字），压到 600 字以内" % len(note))
+        post_upcoming(a.upcoming, note, a.at, a.eta, dry)
+        return 0
 
     version = read_version()
     tag = "v" + version
