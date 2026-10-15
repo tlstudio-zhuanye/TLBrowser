@@ -375,6 +375,26 @@ def main() -> int:
     digest = sha256_of(DIST_EXE)
     log("      sha256 = %s" % digest)
 
+    # ---- 第二道闸门：工具箱自检 ----
+    # 100 项功能里纯计算的那些（IP 互转、子网、哈希、Luhn…）算错了界面上看不出，
+    # 只有样本断言能抓。退出码 = 失败条数。
+    if not dry:
+        r = run([DIST_EXE, "--tooltest"])
+        if r.returncode != 0:
+            rep = os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                               "TLSTUDIO", "TLBrowser", "tooltest.txt")
+            log("")
+            if os.path.exists(rep):
+                with open(rep, encoding="utf-8") as f:
+                    for line in f:
+                        if "FAIL" in line:
+                            log("  " + line.rstrip())
+            log("")
+            log("!! 工具箱自检没过（%d 条失败），先修再发布。" % r.returncode)
+            return 3
+        log("      工具箱自检通过")
+        log("=" * 58)
+
     ann = read_announcement(version)
 
     token = "" if dry else gh_token()

@@ -568,6 +568,142 @@ internal sealed class BrowserForm : Form
         _downloadForm.Activate();
     }
 
+    // ────────────────────────────── 工具箱 ──────────────────────────────
+
+    /// <summary>
+    /// 工具箱子菜单。结构是「工具箱 → 四个分类 → 具体功能」，共 100 项。
+    /// 功能本身全在 ToolBox.cs 里，这里只负责把它们画成菜单、再把点击转成一次调用。
+    /// </summary>
+    private ToolStripMenuItem BuildToolboxMenu()
+    {
+        var root = new ToolStripMenuItem(Lang.T("toolbox.menu"));
+
+        foreach (var cat in ToolBox.Categories)
+        {
+            var sub = new ToolStripMenuItem(Lang.T("toolbox.cat." + cat));
+            foreach (var item in ToolBox.InCategory(cat))
+            {
+                var it = item;
+                var mi = new ToolStripMenuItem(Lang.T("tool." + it.Id));
+                mi.Click += (_, _) => RunTool(it);
+                sub.DropDownItems.Add(mi);
+            }
+            root.DropDownItems.Add(sub);
+        }
+
+        root.DropDownItems.Add(new ToolStripSeparator());
+        var count = new ToolStripMenuItem(Lang.T("toolbox.count", ToolBox.Count)) { Enabled = false };
+        root.DropDownItems.Add(count);
+        return root;
+    }
+
+    /// <summary>
+    /// 跑一个工具箱功能。分三路：
+    ///   要输入的 → 开一个「输入 + 结果」窗，点执行才真跑；
+    ///   一步出结果的 → 直接跑，结果非空就弹结果窗（顺手丢剪贴板）；
+    ///   纯打开页面的 → 跑完什么都别弹，页面自己就是结果。
+    /// </summary>
+    private void RunTool(ToolItem item)
+    {
+        var title = Lang.T("tool." + item.Id);
+        var ctx = BuildToolContext();
+
+        if (item.Kind == ToolKind.Input)
+        {
+            var dlg = new ToolForm(Lang.T("tool.title", title),
+                Lang.T("toolbox.cat." + item.Category), input: true, output: true);
+            dlg.OnRun(async s => await item.Run(s, ctx));
+            dlg.Show(this);
+            return;
+        }
+
+        _ = RunInstantAsync(item, title, ctx);
+    }
+
+    private async Task RunInstantAsync(ToolItem item, string title, ToolContext ctx)
+    {
+        string result;
+        try
+        {
+            result = await item.Run("", ctx);
+        }
+        catch (Exception ex)
+        {
+            result = Lang.T("toolbox.error") + ex.Message;
+        }
+
+        // 空结果 = 这个功能自己已经把事办完了（开了页面 / 弹过提示），别再糊一个空窗给用户
+        if (string.IsNullOrEmpty(result)) return;
+
+        if (item.CopyResult)
+        {
+            try { Clipboard.SetText(result); } catch { }
+        }
+
+        new ToolForm(Lang.T("toolbox.resultTitle", title), result).Show(this);
+    }
+
+    /// <summary>
+    /// 把「功能能对外伸手的那些事」接到主窗口上。
+    /// ToolBox 本身不认识 BrowserForm，全靠这一层桥接。
+    /// </summary>
+    private ToolContext BuildToolContext() => new()
+    {
+        CurrentUrl = () => _current?.CurrentUrl ?? "",
+        PageTitle = async () => _current is null ? "" : await _current.PageTitleAsync(),
+        PageText = async () => _current is null ? "" : await _current.PageTextAsync(),
+        RunScript = async js => _current is null ? "" : await _current.RunScriptAsync(js),
+        Capture = async full => _current is null ? null : await _current.CaptureAsync(full),
+        SetClipboard = s => { try { Clipboard.SetText(s); } catch { } },
+        OpenTab = OpenToolTabAsync,
+        Reload = () => _current?.ReloadNow(),
+        SaveBytes = SaveToolBytes,
+        Info = (t, m) => MessageBox.Show(this, m, t, MessageBoxButtons.OK, MessageBoxIcon.Information),
+        Confirm = (t, m) => MessageBox.Show(this, m, t,
+            MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+            MessageBoxDefaultButton.Button2) == DialogResult.Yes,
+        SetScriptEnabled = on => _current?.SetScriptEnabled(on),
+        SetImagesEnabled = on => _current?.SetImagesEnabled(on),
+        ImagesDisabled = () => _current?.ImagesDisabled ?? false,
+        AdBlockOn = () => Safety.AdBlock,
+        SetAdBlock = on => { Safety.AdBlock = on; UpdateShield(); },
+    };
+
+    /// <summary>工具箱要开新标签时的入口。空串表示就是普通的「新标签页」。</summary>
+    private async Task OpenToolTabAsync(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            await OpenTabAsync(null);
+            return;
+        }
+        await OpenTabAsync(url);
+    }
+
+    /// <summary>工具箱要把字节存盘（截图）时走这里：弹另存为对话框。</summary>
+    private string SaveToolBytes(string title, byte[] bytes, string suggestedName)
+    {
+        using var dlg = new SaveFileDialog
+        {
+            Title = title,
+            FileName = suggestedName,
+            Filter = "PNG 图片 (*.png)|*.png|所有文件 (*.*)|*.*",
+            OverwritePrompt = true
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return "";
+
+        try
+        {
+            File.WriteAllBytes(dlg.FileName, bytes);
+            return dlg.FileName;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return "";
+        }
+    }
+
     /// <summary>菜单上标出企业模式是否开着，免得锁上了自己都忘了。</summary>
     private static string KioskMenuText() =>
         Kiosk.Enabled ? Lang.T("kiosk.menu") + "  ✓" : Lang.T("kiosk.menu");
@@ -1071,6 +1207,7 @@ internal sealed class BrowserForm : Form
         menu.Items.Add(Menu(Lang.T("menu.reopen"), "Ctrl+Shift+T", ReopenClosedTab));
         menu.Items.Add(Menu(DownloadsMenuText(), "Ctrl+J", ShowDownloads));
         menu.Items.Add(BuildBookmarkMenu());
+        menu.Items.Add(BuildToolboxMenu());
         menu.Items.Add(Menu(_current?.IsMuted == true ? Lang.T("menu.unmute") : Lang.T("menu.mute"),
             null, () => _current?.ToggleMute()));
         menu.Items.Add(AdBlockMenuItem());

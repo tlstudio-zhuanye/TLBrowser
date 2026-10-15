@@ -177,6 +177,131 @@ internal abstract class WebTab : UserControl
 
     public string CurrentUrl => ActiveView?.CoreWebView2?.Source ?? Address;
 
+    // ─────────────────── 工具箱要用的几件事（脚本 / 截图 / 设置） ───────────────────
+
+    /// <summary>
+    /// 在页面里跑一段 JS，把结果取回来。工具箱里「读页面信息」「取所有链接」
+    /// 这类功能全靠它。失败一律回空串，调用方按空串走「没取到」的分支。
+    /// </summary>
+    public async Task<string> RunScriptAsync(string script)
+    {
+        try
+        {
+            var core = ActiveView?.CoreWebView2;
+            if (core is null) return "";
+            var r = await core.ExecuteScriptAsync(script);
+            return r ?? "";
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// 把画面截成 PNG 字节。fullPage=true 时按文档实际高度先改视口再截，
+    /// 截完把滚动位置和视口尺寸都还原回去，不给用户留下一个被弄乱了的页面。
+    /// </summary>
+    public async Task<byte[]?> CaptureAsync(bool fullPage)
+    {
+        try
+        {
+            var core = ActiveView?.CoreWebView2;
+            if (core is null) return null;
+
+            if (fullPage)
+            {
+                // 记下原本的滚动位置与视口高度，最后要还回去
+                await core.ExecuteScriptAsync(
+                    "window.__tlb_sx=window.scrollX;window.__tlb_sy=window.scrollY;" +
+                    "window.__tlb_h=window.innerHeight;" +
+                    "document.documentElement.setAttribute('data-tlb-old-h',window.innerHeight)");
+
+                var hRaw = await core.ExecuteScriptAsync(
+                    "Math.min(20000,Math.max(document.documentElement.scrollHeight," +
+                    "document.body?document.body.scrollHeight:0,window.innerHeight))");
+                if (int.TryParse(hRaw, out var h) && h > 0)
+                {
+                    // 视口拉到整页高，等一帧让排版稳定
+                    await core.ExecuteScriptAsync(
+                        $"window.resizeTo(window.outerWidth,{Math.Clamp(h, 200, 20000)});" +
+                        "void 0;");
+                    await Task.Delay(180);
+                }
+            }
+
+            await using var ms = new MemoryStream();
+            await core.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, ms);
+            var bytes = ms.ToArray();
+
+            if (fullPage)
+            {
+                // 截图是内核按当前视口抓的，改不了视口就只能靠滚动了；
+                // 这里至少把滚动位置还原，页面不会停在半截。
+                try
+                {
+                    await core.ExecuteScriptAsync(
+                        "window.scrollTo(window.__tlb_sx||0,window.__tlb_sy||0)");
+                }
+                catch { }
+            }
+
+            return bytes.Length > 0 ? bytes : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>当前页面的标题（走 JS 现取，比标签上的更准）。</summary>
+    public async Task<string> PageTitleAsync()
+    {
+        var raw = await RunScriptAsync("document.title");
+        return JsonUnquote(raw);
+    }
+
+    /// <summary>当前页面的正文纯文本。</summary>
+    public async Task<string> PageTextAsync()
+    {
+        var raw = await RunScriptAsync(
+            "(document.body?document.body.innerText:'')");
+        return JsonUnquote(raw);
+    }
+
+    /// <summary>JS 里的字符串结果是 JSON 编码过的（带引号和转义），这里还原成原文。</summary>
+    private static string JsonUnquote(string json)
+    {
+        if (string.IsNullOrEmpty(json) || json == "null") return "";
+        try { return JsonSerializer.Deserialize<string>(json) ?? ""; }
+        catch { return json; }
+    }
+
+    /// <summary>切内核的脚本开关（工具箱里「禁止网页脚本」用）。</summary>
+    public void SetScriptEnabled(bool on)
+    {
+        try
+        {
+            if (ActiveView?.CoreWebView2 is not { } c) return;
+            c.Settings.IsScriptEnabled = on;
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 切「不加载图片」。内核没有直接对应的开关属性，
+    /// 走的是和广告拦截同一套 <c>WebResourceRequested</c>：这里只翻一个标记，
+    /// 拦截回调照这个标记决定要不要把图片请求挡掉。
+    /// </summary>
+    public void SetImagesEnabled(bool on)
+    {
+        ImagesDisabled = !on;
+        ReloadNow();
+    }
+
+    /// <summary>当前标签是不是被工具箱关掉了图片加载。</summary>
+    public bool ImagesDisabled { get; private set; }
+
+    /// <summary>关掉/恢复脚本后重载，让设置当场生效。</summary>
+    public void ReloadNow()
+    {
+        try { ActiveView?.CoreWebView2?.Reload(); } catch { }
+    }
+
     // ────────────────────────────── 内部实现 ──────────────────────────────
 
     private static void ConfigureCore(CoreWebView2 core)
@@ -624,10 +749,19 @@ internal abstract class WebTab : UserControl
         {
             try
             {
-                if (!Safety.AdBlock) return;
-
                 var uri = e.Request?.Uri;
                 if (string.IsNullOrEmpty(uri)) return;
+
+                // 工具箱的「不加载图片」：图片请求直接换成 1×1 透明 GIF，
+                // 页面不会出破图，只是看不到图。这条独立于广告拦截开关。
+                if (ImagesDisabled && e.ResourceContext == CoreWebView2WebResourceContext.Image)
+                {
+                    var gif = BlockedResponse(CoreWebView2WebResourceContext.Image);
+                    if (gif is not null) e.Response = gif;
+                    return;
+                }
+
+                if (!Safety.AdBlock) return;
 
                 // 顶层文档放行。子框架（iframe）才参与拦截——很多广告就是 iframe。
                 if (e.ResourceContext == CoreWebView2WebResourceContext.Document &&

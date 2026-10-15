@@ -31,6 +31,10 @@ internal static class Program
         if (args.Any(a => a.Equals("--kiosktest", StringComparison.OrdinalIgnoreCase)))
             return RunKioskTest();
 
+        // 工具箱 100 项功能的自检。纯计算类逐条断言，退出码 = 失败条数。
+        if (args.Any(a => a.Equals("--tooltest", StringComparison.OrdinalIgnoreCase)))
+            return RunToolTest();
+
         // 启动参数先过主页守护的白名单。往快捷方式里追加网址是外部程序改主页最常用的手法，
         // 白名单之外的参数在这里就被丢掉，起始页永远是本站首页。
         var startUrl = HomeGuard.GateStartUrl(args, out var dual, out var noSplash, out var openGuard);
@@ -292,6 +296,19 @@ internal static class Program
         }
         catch { }
 
+        return bad;
+    }
+
+    /// <summary>--tooltest：跑工具箱的自检样本，报告写 tooltest.txt，退出码 = 失败条数。</summary>
+    private static int RunToolTest()
+    {
+        var bad = ToolBox.SelfTest(out var text);
+        try
+        {
+            File.WriteAllText(Path.Combine(Brand.AppDataDir, "tooltest.txt"),
+                text, new UTF8Encoding(false));
+        }
+        catch { }
         return bad;
     }
 

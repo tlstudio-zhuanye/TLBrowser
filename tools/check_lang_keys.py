@@ -41,6 +41,19 @@ I18N_RE = re.compile(r'\["([^"]+)"\]\s*=\s*Lang\.T\(')       # HomePage 注入�
 DYNAMIC_KEYS = [
     "dl.sumActive", "dl.sumIdle",
     "dl.state.done", "dl.state.canceled", "dl.state.interrupted", "dl.state.active",
+    # 工具箱：分类名与功能名是拿 id 拼出来的（toolbox.cat.<cat> / tool.<id>）
+    "toolbox.cat.ops", "toolbox.cat.web", "toolbox.cat.text", "toolbox.cat.safe",
+    # 工具箱：一格里二选一的那些
+    "web.shotSave", "web.shotFullSave",
+    "pageinfo.yes", "pageinfo.no",
+    "web.styleOff", "web.readerOn", "web.darkOn",
+    "verifyhash.match", "verifyhash.mismatch",
+    "idcard.ok", "idcard.bad", "idcard.male", "idcard.female",
+    "luhn.ok", "luhn.bad",
+    "privacy.on", "privacy.off",
+    "strength.weak", "strength.fair", "strength.good", "strength.strong",
+    "entropy.instant", "entropy.sec", "entropy.min", "entropy.hour", "entropy.day", "entropy.year",
+    "ipclass.private", "ipclass.loopback", "ipclass.linkLocal", "ipclass.multicast", "ipclass.public",
 ]
 
 
