@@ -99,9 +99,9 @@ internal sealed class ToolContext
 }
 
 /// <summary>
-/// 工具箱：100 项常用功能的执行体。
+/// 工具箱：112 项常用功能的执行体。
 ///
-/// 设计取舍：100 项如果每项都配一套自己的界面，工程量和维护成本都会失控。
+/// 设计取舍：上百项如果每项都配一套自己的界面，工程量和维护成本都会失控。
 /// 所以这里只做「输入 → 计算 → 出一段文本」这一个统一模型，
 /// 界面部分（多级子菜单 / 通用输入窗 / 结果窗）复用一套。
 /// 少数几个必须碰页面的功能（截图 / 打印 / 摘链接）通过 <see cref="ToolContext"/> 回调出去。
@@ -180,6 +180,9 @@ internal static class ToolBox
         yield return New("ops.myip", CatOps, ToolKind.Report, (_, _) => Task.FromResult(LocalIps()));
         yield return New("ops.disk", CatOps, ToolKind.Report, (_, _) => Task.FromResult(DiskInfo()));
         yield return New("ops.newline", CatOps, ToolKind.Input, (s, _) => Task.FromResult(Newline(s)));
+        yield return New("ops.radix", CatOps, ToolKind.Input, (s, _) => Task.FromResult(RadixConvert(s)));
+        yield return New("ops.cron", CatOps, ToolKind.Input, (s, _) => Task.FromResult(CronExplain(s)));
+        yield return New("ops.urlparts", CatOps, ToolKind.Input, (s, _) => Task.FromResult(UrlParts(s)));
     }
 
     // ── 二、网页 / 浏览（25）──
@@ -274,6 +277,26 @@ internal static class ToolBox
             return Task.FromResult("");
         });
         yield return Page("web.clearsite", (_, c) => ClearSiteData(c));
+        yield return New("web.unlockcopy", CatWeb, ToolKind.Instant, async (_, c) =>
+        {
+            await c.RunScript(UnlockCopyJs);
+            return Lang.T("web.unlockCopyDone");
+        }, copy: false);
+        yield return New("web.outline", CatWeb, ToolKind.Instant, async (_, c) =>
+        {
+            var t = Unquote(await c.RunScript(OutlineJs));
+            return t.Length == 0 ? Lang.T("web.outlineNone") : t;
+        });
+        yield return New("web.copyhtml", CatWeb, ToolKind.Instant, async (_, c) =>
+        {
+            var html = Unquote(await c.RunScript("document.documentElement.outerHTML"));
+            if (html.Length == 0) return "";
+            c.SetClipboard(html);
+            var path = c.SaveBytes(Lang.T("web.copyHtmlName"), Encoding.UTF8.GetBytes(html), ".html");
+            return path.Length > 0
+                ? Lang.T("web.copyHtmlSaved", path)
+                : Lang.T("web.copyHtmlCopied", html.Length);
+        }, copy: false);
     }
 
     // ── 三、文本 / 日常（25）──
@@ -315,6 +338,9 @@ internal static class ToolBox
         yield return New("text.narrow2wide", CatText, ToolKind.Input, (s, _) => Task.FromResult(WideNarrow(s, true)));
         yield return New("text.t2s", CatText, ToolKind.Input, (s, _) => Task.FromResult(TradSimp(s, false)));
         yield return New("text.replace", CatText, ToolKind.Input, (s, _) => Task.FromResult(Replace(s)));
+        yield return New("text.rmb", CatText, ToolKind.Input, (s, _) => Task.FromResult(RmbUpper(s)));
+        yield return New("text.numfmt", CatText, ToolKind.Input, (s, _) => Task.FromResult(NumberFormat(s)));
+        yield return New("text.sortnum", CatText, ToolKind.Input, (s, _) => Task.FromResult(SortNumeric(s)));
     }
 
     // ── 四、安全 / 隐私（25）──
@@ -389,6 +415,316 @@ internal static class ToolBox
             await Task.CompletedTask;
             return string.Join("\n", lines);
         });
+        yield return New("safe.rand", CatSafe, ToolKind.Input, (s, _) => Task.FromResult(RandomNumbers(s)));
+        yield return New("safe.validate", CatSafe, ToolKind.Input, (s, _) => Task.FromResult(FormatCheck(s)));
+        yield return New("safe.mask", CatSafe, ToolKind.Input, (s, _) => Task.FromResult(MaskPii(s)));
+    }
+
+    // ────────────────────── 追加功能（v1.1.8）──────────────────────
+
+    /// <summary>进制互转：认 0x / 0b / 0o 前缀，其余按十进制。</summary>
+    internal static string RadixConvert(string raw)
+    {
+        var s = (raw ?? "").Trim();
+        if (s.Length == 0) return Lang.T("toolbox.empty");
+        var b = 10;
+        var num = s;
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) { b = 16; num = s[2..]; }
+        else if (s.StartsWith("0b", StringComparison.OrdinalIgnoreCase)) { b = 2; num = s[2..]; }
+        else if (s.StartsWith("0o", StringComparison.OrdinalIgnoreCase)) { b = 8; num = s[2..]; }
+        if (num.Length == 0) return Lang.T("toolbox.badNumber");
+        try
+        {
+            var neg = num.StartsWith('-');
+            if (neg) num = num[1..];
+            var v = Convert.ToUInt64(num, b);
+            var sign = neg ? "-" : "";
+            return string.Join("\n", new[]
+            {
+                "十进制    " + sign + v,
+                "十六进制  " + sign + "0x" + v.ToString("X"),
+                "八进制    " + sign + "0o" + Convert.ToString((long)v, 8),
+                "二进制    " + sign + "0b" + Convert.ToString((long)v, 2),
+            });
+        }
+        catch { return Lang.T("toolbox.badNumber"); }
+    }
+
+    /// <summary>把 5 段式 cron 翻成人话，让人不查表也能看懂。</summary>
+    internal static string CronExplain(string raw)
+    {
+        var f = (raw ?? "").Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (f.Length != 5) return Lang.T("cron.bad");
+
+        static string Seg(string v, string unit, string every)
+        {
+            if (v == "*") return "每" + every;
+            if (v.StartsWith("*/") && v.Length > 2) return "每 " + v[2..] + " " + unit;
+            if (v.Contains(',')) return string.Join("、", v.Split(',').Select(x => x + " " + unit));
+            if (v.Contains('-'))
+            {
+                var p = v.Split('/');
+                var r = p[0].Split('-');
+                var head = r[0] + " 到 " + r[1] + " " + unit;
+                return p.Length == 2 ? head + "（每 " + p[1] + "）" : head;
+            }
+            return v + " " + unit;
+        }
+
+        static string DowName(string x)
+        {
+            var names = new[] { "周日", "周一", "周二", "周三", "周四", "周五", "周六" };
+            if (x.Length == 1 && x[0] >= '0' && x[0] <= '7')
+            {
+                var i = x[0] == '7' ? 0 : x[0] - '0';
+                return names[i];
+            }
+            return x;
+        }
+
+        string Dow(string v)
+        {
+            if (v == "*") return "每天都行";
+            if (v.Contains(',')) return string.Join("、", v.Split(',').Select(DowName));
+            if (v.Contains('-'))
+            {
+                var r = v.Split('-');
+                return r[0] + " 到 " + DowName(r[1]);
+            }
+            return DowName(v);
+        }
+
+        var lines = new List<string>
+        {
+            "分钟  " + Seg(f[0], "分", "分钟"),
+            "小时  " + Seg(f[1], "点", "小时"),
+            "日期  " + Seg(f[2], "日", "天"),
+            "月份  " + Seg(f[3], "月", "月"),
+            "星期  " + Dow(f[4]),
+        };
+        return Lang.T("cron.head") + "\n" + string.Join("\n", lines);
+    }
+
+    /// <summary>拆一个 URL：协议 / 主机 / 端口 / 路径 / 每个查询参数 / 锚点。</summary>
+    internal static string UrlParts(string raw)
+    {
+        if (!Uri.TryCreate((raw ?? "").Trim(), UriKind.Absolute, out var u))
+            return Lang.T("urlparts.bad");
+        var lines = new List<string>
+        {
+            "协议  " + u.Scheme,
+            "主机  " + u.Host,
+            "端口  " + (u.IsDefaultPort ? u.Port + "（默认）" : u.Port.ToString()),
+            "路径  " + u.AbsolutePath,
+        };
+        if (u.Query.Length > 1)
+        {
+            foreach (var kv in u.Query.TrimStart('?').Split('&'))
+            {
+                if (kv.Length == 0) continue;
+                var i = kv.IndexOf('=');
+                var k = i < 0 ? kv : kv[..i];
+                var v = i < 0 ? "" : kv[(i + 1)..];
+                lines.Add("参数  " + Uri.UnescapeDataString(k) + " = " + Uri.UnescapeDataString(v));
+            }
+        }
+        else lines.Add("参数  （无）");
+        if (u.Fragment.Length > 1)
+            lines.Add("锚点  " + Uri.UnescapeDataString(u.Fragment.TrimStart('#')));
+        return string.Join("\n", lines);
+    }
+
+    private const string UnlockCopyJs =
+        "(function(){var evs=['copy','cut','paste','contextmenu','selectstart','dragstart','mousedown'];" +
+        "evs.forEach(function(n){document.addEventListener(n,function(e){e.stopPropagation();},true);});" +
+        "['oncopy','oncut','onpaste','oncontextmenu','onselectstart','ondragstart']" +
+        ".forEach(function(k){document[k]=null;document.documentElement[k]=null;if(document.body)document.body[k]=null;});" +
+        "var st=document.createElement('style');" +
+        "st.textContent='*{-webkit-user-select:text!important;user-select:text!important;}';" +
+        "(document.head||document.documentElement).appendChild(st);return 1;})()";
+
+    private const string OutlineJs =
+        "(function(){var hs=document.querySelectorAll('h1,h2,h3,h4,h5,h6');if(!hs.length)return '';" +
+        "var out=[];for(var i=0;i<hs.length;i++){var h=hs[i];" +
+        "var lv=parseInt(h.tagName.substring(1),10);" +
+        "var t=(h.textContent||'').replace(/\\s+/g,' ').trim();" +
+        "if(t)out.push(new Array(lv).join('  ')+'- '+t);}return out.join('\\n');})()";
+
+    private static readonly string[] RmbD = { "零", "壹", "贰", "叁", "肆", "伍", "陆", "柒", "捌", "玖" };
+
+    /// <summary>数字转人民币中文大写。</summary>
+    internal static string RmbUpper(string raw)
+    {
+        var s = (raw ?? "").Trim().Replace(",", "").Replace("￥", "").Replace("¥", "");
+        if (s.Length == 0) return Lang.T("toolbox.badNumber");
+        if (!decimal.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+            return Lang.T("toolbox.badNumber");
+        if (v < 0) return Lang.T("rmb.negative");
+        if (v >= 10000000000000000m) return Lang.T("rmb.tooBig");
+
+        v = Math.Round(v, 2);
+        var integer = (long)decimal.Truncate(v);
+        var cents = (int)Math.Round((v - integer) * 100, MidpointRounding.AwayFromZero);
+
+        var sb = new StringBuilder();
+        sb.Append(integer == 0 ? "零" : IntToRmb(integer)).Append("元");
+        if (cents == 0) return sb.Append("整").ToString();
+
+        var jiao = cents / 10;
+        var fen = cents % 10;
+        if (jiao > 0) sb.Append(RmbD[jiao]).Append("角");
+        else if (fen > 0) sb.Append("零");
+        if (fen > 0) sb.Append(RmbD[fen]).Append("分");
+        return sb.ToString();
+    }
+
+    /// <summary>整数部分转大写（四位一组：万 / 亿 / 万亿）。</summary>
+    private static string IntToRmb(long n)
+    {
+        if (n == 0) return "零";
+        var unit1 = new[] { "", "拾", "佰", "仟" };
+        var unit2 = new[] { "", "万", "亿", "万亿" };
+        var s = n.ToString();
+        var pad = (4 - s.Length % 4) % 4;
+        s = new string('0', pad) + s;
+
+        var sb = new StringBuilder();
+        var groups = s.Length / 4;
+        for (var g = 0; g < groups; g++)
+        {
+            var grp = s.Substring(g * 4, 4);
+            var gsb = new StringBuilder();
+            var pendingZero = false;
+            for (var i = 0; i < 4; i++)
+            {
+                var d = grp[i] - '0';
+                if (d == 0) { if (gsb.Length > 0) pendingZero = true; }
+                else
+                {
+                    if (pendingZero) { gsb.Append('零'); pendingZero = false; }
+                    gsb.Append(RmbD[d]).Append(unit1[3 - i]);
+                }
+            }
+            if (gsb.Length > 0)
+            {
+                if (sb.Length > 0 && sb[^1] != '零' && grp[0] == '0') sb.Append('零');
+                sb.Append(gsb).Append(unit2[groups - 1 - g]);
+            }
+            else if (sb.Length > 0 && sb[^1] != '零') sb.Append('零');
+        }
+        return sb.ToString().TrimEnd('零');
+    }
+
+    /// <summary>千分位格式化，最多保留原有小数位。</summary>
+    internal static string NumberFormat(string raw)
+    {
+        var s = (raw ?? "").Trim();
+        if (s.Length == 0) return Lang.T("toolbox.badNumber");
+        if (!decimal.TryParse(s.Replace(",", ""), NumberStyles.Float, CultureInfo.InvariantCulture, out var v))
+            return Lang.T("toolbox.badNumber");
+        return v.ToString("#,##0.##########", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>按数字大小给行排序（认不出的当 0）。</summary>
+    internal static string SortNumeric(string s) =>
+        string.Join("\n", Lines(s).OrderBy(l =>
+        {
+            decimal.TryParse(l.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d);
+            return d;
+        }));
+
+    /// <summary>随机整数：支持「100」「1-100」「1-100 x5」，范围内够就保证不重复。</summary>
+    internal static string RandomNumbers(string raw)
+    {
+        var s = (raw ?? "").Trim().Replace(" ", "").Replace("×", "x").Replace("X", "x");
+        if (s.Length == 0) return Lang.T("toolbox.empty");
+
+        var count = 4;
+        var xi = s.IndexOf('x');
+        if (xi >= 0)
+        {
+            if (!int.TryParse(s[(xi + 1)..], out count) || count < 1) return Lang.T("rand.bad");
+            if (count > 500) count = 500;
+            s = s[..xi];
+        }
+
+        long min = 1, max = 100;
+        if (s.Contains('-'))
+        {
+            var p = s.Split('-');
+            if (!long.TryParse(p[0], out min) || !long.TryParse(p[1], out max)) return Lang.T("rand.bad");
+        }
+        else if (long.TryParse(s, out var only)) { min = 1; max = only; }
+        else return Lang.T("rand.bad");
+
+        if (max < min) (min, max) = (max, min);
+        if (max - min > int.MaxValue - 2) return Lang.T("rand.bad");
+        var lo = (int)min;
+        var hi = (int)max;
+        var span = (long)hi - lo + 1;
+        var unique = span >= count;
+
+        var res = new List<int>();
+        var seen = new HashSet<int>();
+        var guard = 0;
+        while (res.Count < count && guard++ < count * 200 + 500)
+        {
+            var v = RandomNumberGenerator.GetInt32(lo, hi + 1);
+            if (unique && !seen.Add(v)) continue;
+            res.Add(v);
+        }
+        return string.Join("\n", res);
+    }
+
+    /// <summary>自动认一段文本像哪几种格式。</summary>
+    internal static string FormatCheck(string raw)
+    {
+        var s = (raw ?? "").Trim();
+        if (s.Length == 0) return Lang.T("toolbox.empty");
+        var hits = new List<string>();
+        if (Regex.IsMatch(s, @"^[\w.%+-]+@[\w.-]+\.[A-Za-z]{2,}$")) hits.Add(Lang.T("validate.email"));
+        if (Regex.IsMatch(s, @"^1[3-9]\d{9}$")) hits.Add(Lang.T("validate.mobile"));
+        if (Regex.IsMatch(s, @"^(\+?\d{1,3}[- ]?)?\d{7,14}$")) hits.Add(Lang.T("validate.phone"));
+        if (Regex.IsMatch(s, @"^https?://\S+$")) hits.Add(Lang.T("validate.url"));
+        if (IPAddress.TryParse(s, out var ip))
+            hits.Add(ip.GetAddressBytes().Length == 4 ? Lang.T("validate.ipv4") : Lang.T("validate.ipv6"));
+        if (Regex.IsMatch(s, @"^\d{17}[\dXx]$")) hits.Add(Lang.T("validate.idcard"));
+        if (Regex.IsMatch(s, @"^\d{4}-\d{2}-\d{2}$")) hits.Add(Lang.T("validate.date"));
+        if (Regex.IsMatch(s, @"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+            hits.Add(Lang.T("validate.uuid"));
+        if (Regex.IsMatch(s, @"^\d{15,19}$")) hits.Add(Lang.T("validate.bankcard"));
+        if (hits.Count == 0) return Lang.T("validate.none");
+        return Lang.T("validate.head") + "\n" + string.Join("\n", hits.Select(h => "· " + h));
+    }
+
+    /// <summary>把文本里的手机号 / 邮箱 / 身份证 / 银行卡打上码。</summary>
+    internal static string MaskPii(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return Lang.T("toolbox.empty");
+        var n = 0;
+
+        s = Regex.Replace(s, @"\b(\d{4})\d{10}(\d{3}[\dXx])\b", m =>
+        {
+            n++;
+            return m.Groups[1].Value + "**********" + m.Groups[2].Value;
+        });
+        s = Regex.Replace(s, @"\b(1[3-9]\d)\d{4}(\d{4})\b", m =>
+        {
+            n++;
+            return m.Groups[1].Value + "****" + m.Groups[2].Value;
+        });
+        s = Regex.Replace(s, @"\b([\w.%+-])[\w.%+-]*@([\w.-]+\.[A-Za-z]{2,})\b", m =>
+        {
+            n++;
+            return m.Groups[1].Value + "***@" + m.Groups[2].Value;
+        });
+        s = Regex.Replace(s, @"\b(\d{4})\d{8,11}(\d{4})\b", m =>
+        {
+            n++;
+            return m.Groups[1].Value + " **** **** " + m.Groups[2].Value;
+        });
+
+        return n == 0 ? Lang.T("mask.none") : Lang.T("mask.head", n) + "\n" + s;
     }
 
     // ────────────────────────── 小助手 ──────────────────────────
@@ -1620,13 +1956,6 @@ internal static class ToolBox
         sb.AppendLine(new string('=', 70));
 
         var bad = 0;
-        void Check(string name, string got, string want)
-        {
-            var ok = got == want;
-            if (!ok) bad++;
-            sb.AppendLine($"  [{(ok ? "PASS" : "FAIL")}] {name}");
-            if (!ok) sb.AppendLine($"         期望：{want}\n         实际：{got}");
-        }
 
         void CheckTrue(string name, bool ok, string detail)
         {
@@ -1634,11 +1963,11 @@ internal static class ToolBox
             sb.AppendLine($"  [{(ok ? "PASS" : "FAIL")}] {name}   {detail}");
         }
 
-        // 每个分类都得是 25 项，加起来 100
-        CheckTrue("四个分类各 25 项", InCategory(CatOps).Count == 25 &&
-                                     InCategory(CatWeb).Count == 25 &&
-                                     InCategory(CatText).Count == 25 &&
-                                     InCategory(CatSafe).Count == 25,
+        // 每个分类都得是 28 项，加起来 112
+        CheckTrue("四个分类各 28 项", InCategory(CatOps).Count == 28 &&
+                                     InCategory(CatWeb).Count == 28 &&
+                                     InCategory(CatText).Count == 28 &&
+                                     InCategory(CatSafe).Count == 28,
             $"{InCategory(CatOps).Count}/{InCategory(CatWeb).Count}/" +
             $"{InCategory(CatText).Count}/{InCategory(CatSafe).Count}");
 
@@ -1711,6 +2040,28 @@ internal static class ToolBox
         CheckTrue("PII 检测到邮箱", ScanPii("a@b.com").Contains("a@b.com"), "");
         CheckTrue("URL 风险识别 IP 直连", UrlDanger("http://1.2.3.4/x").Contains("⚠"), "");
         CheckTrue("密码强度评分", Strength("xK9#mQ2$vL8@nR4!").Contains("/100"), "");
+
+        sb.AppendLine();
+        sb.AppendLine("· 追加功能");
+        CheckTrue("进制转换 0xFF", RadixConvert("0xFF").Contains("255"), "");
+        CheckTrue("进制转换 255", RadixConvert("255").Contains("11111111"), "");
+        CheckTrue("cron 每 5 分钟", CronExplain("*/5 * * * *").Contains("每 5 分"), "");
+        CheckTrue("cron 段数不对要报错", CronExplain("* * *") != CronExplain("* * * * *"), "");
+        CheckTrue("URL 拆查询参数", UrlParts("https://a.com/x?k=1&t=2").Contains("k = 1"), "");
+        CheckTrue("URL 非法不崩", UrlParts("nonsense").Length > 0, "");
+        CheckTrue("人民币大写", RmbUpper("1234.56") == "壹仟贰佰叁拾肆元伍角陆分", RmbUpper("1234.56"));
+        CheckTrue("人民币整元", RmbUpper("100").EndsWith("元整"), RmbUpper("100"));
+        CheckTrue("人民币万级", RmbUpper("1000001").Contains("壹佰万零壹"), RmbUpper("1000001"));
+        CheckTrue("千分位", NumberFormat("1234567.891") == "1,234,567.891", NumberFormat("1234567.891"));
+        CheckTrue("按数字排序", SortNumeric("10\n2\n1").Split('\n')[0] == "1", SortNumeric("10\n2\n1"));
+        var rn = RandomNumbers("1-100 x5").Split('\n');
+        CheckTrue("随机数个数", rn.Length == 5, rn.Length.ToString());
+        CheckTrue("随机数不重复", rn.Distinct().Count() == 5, "");
+        CheckTrue("随机数落在范围内", rn.All(x => int.TryParse(x, out var q) && q >= 1 && q <= 100), "");
+        CheckTrue("格式校验认手机号", FormatCheck("13800138000").Contains("\n"), "");
+        CheckTrue("格式校验认不出乱码", !FormatCheck("???").Contains("\n"), "");
+        CheckTrue("打码手机号", MaskPii("13800138000").Contains("138****8000"), MaskPii("13800138000"));
+        CheckTrue("打码邮箱", MaskPii("a@b.com").Contains("***@"), MaskPii("a@b.com"));
 
         sb.AppendLine();
         sb.AppendLine(new string('=', 70));
