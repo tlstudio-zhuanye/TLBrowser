@@ -51,7 +51,11 @@
   .logo{width:76px;height:76px;object-fit:contain;user-select:none;-webkit-user-drag:none}
 
   /* ── omnibox ─────────────────────────────────────────── */
-  .omni{position:relative;margin-top:34px;width:100%;max-width:560px}
+  /* ⚠️ z-index 不能删：入场动画给 .tiles 留了一个「永久生效」的层叠上下文
+     （animation ... both 会一直动 transform，浏览器就把它当成独立层），
+     而 .tiles 在 DOM 里排在 .omni 后面 —— 层叠上下文同层时后来者居上，
+     结果磁贴会盖住联想面板。把 .omni 抬到正值层，整棵子树（含 .panel）就都压在上面了。 */
+  .omni{position:relative;z-index:10;margin-top:34px;width:100%;max-width:560px}
   .box{
     display:flex; align-items:center; gap:8px; height:52px;
     padding:0 6px 0 16px; background:var(--card);

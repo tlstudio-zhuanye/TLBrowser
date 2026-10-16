@@ -126,15 +126,23 @@ internal static class HomePage
             .Distinct()
             .ToList();
 
-        detail = (missing.Count, leftover.Count) switch
-        {
-            (0, 0) => "主页内容自检通过：搜索引擎与两个官网地址都在，占位符全部替换",
-            (0, _) => "主页占位符没替换干净：" + string.Join(" / ", leftover),
-            (_, 0) => "主页内容自检失败，缺少：" + string.Join(" / ", missing),
-            _ => "主页自检失败，缺少 " + string.Join(" / ", missing) +
-                 "；占位符没替换：" + string.Join(" / ", leftover),
-        };
-        return missing.Count == 0 && leftover.Count == 0;
+        // 3) 联想面板的层叠守护：.omni 规则里必须带一个正值 z-index。
+        //    入场动画 .tiles{animation:rise … both} 会让磁贴那行留下一个**永久生效**的层叠上下文，
+        //    而 .tiles 在 DOM 里排在 .omni 之后 —— 层叠上下文同层时后来者居上，少了这句 z-index，
+        //    搜索联想列表就会被「快捷入口」磁贴盖住（v1.1.8 的堆叠 bug）。它编译不报错、只有肉眼
+        //    能看出来，所以在这里硬性拦住，谁把 z-index 删了自检就红。
+        var stackOk = System.Text.RegularExpressions.Regex
+            .IsMatch(html, @"\.omni\{[^}]*z-index\s*:\s*[1-9]");
+
+        var problems = new List<string>();
+        if (missing.Count > 0) problems.Add("缺少：" + string.Join(" / ", missing));
+        if (leftover.Count > 0) problems.Add("占位符没替换：" + string.Join(" / ", leftover));
+        if (!stackOk) problems.Add("联想面板层叠守护缺失：.omni 规则里没有正值 z-index，磁贴会盖住联想列表");
+
+        detail = problems.Count == 0
+            ? "主页内容自检通过：搜索引擎与两个官网地址都在，占位符全部替换，联想面板层叠正确"
+            : "主页自检失败 —— " + string.Join("；", problems);
+        return problems.Count == 0;
     }
 
     private static string Html(string s) =>
