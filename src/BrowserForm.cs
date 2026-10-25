@@ -653,6 +653,7 @@ internal sealed class BrowserForm : Form
         PageTitle = async () => _current is null ? "" : await _current.PageTitleAsync(),
         PageText = async () => _current is null ? "" : await _current.PageTextAsync(),
         RunScript = async js => _current is null ? "" : await _current.RunScriptAsync(js),
+        ClearSiteData = async () => _current is null ? "" : await _current.ClearSiteDataAsync(),
         Capture = async full => _current is null ? null : await _current.CaptureAsync(full),
         SetClipboard = s => { try { Clipboard.SetText(s); } catch { } },
         OpenTab = OpenToolTabAsync,

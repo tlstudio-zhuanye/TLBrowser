@@ -63,6 +63,13 @@ internal sealed class ToolContext
     /// <summary>在当前页跑一段 JS 并取回结果（已转义的 JSON 原串）。</summary>
     public Func<string, Task<string>> RunScript { get; init; } = _ => Task.FromResult("");
 
+    /// <summary>
+    /// 把当前站点在这台电脑上的痕迹清一遍（Cookie 含 HttpOnly、localStorage、
+    /// sessionStorage、IndexedDB、CacheStorage、Service Worker），返回清理明细文本。
+    /// 「重置免费次数」靠它。
+    /// </summary>
+    public Func<Task<string>> ClearSiteData { get; init; } = () => Task.FromResult("");
+
     /// <summary>当前页截图，返回 PNG 字节；失败给 null。</summary>
     public Func<bool, Task<byte[]?>> Capture { get; init; } = _ => Task.FromResult<byte[]?>(null);
 
@@ -277,6 +284,7 @@ internal static class ToolBox
             return Task.FromResult("");
         });
         yield return Page("web.clearsite", (_, c) => ClearSiteData(c));
+        yield return Page("web.resettrial", (_, c) => ResetTrial(c));
         yield return New("web.unlockcopy", CatWeb, ToolKind.Instant, async (_, c) =>
         {
             await c.RunScript(UnlockCopyJs);
@@ -1416,6 +1424,29 @@ internal static class ToolBox
         return Lang.T("web.clearSiteDone", host);
     }
 
+    /// <summary>
+    /// 「重置免费次数」：把限制免费次数的网站清回「第一次来」的状态，然后刷新页面，
+    /// 用户就能接着用。那些网站一般把「还能免费用几次」记在本机的
+    /// Cookie / localStorage / IndexedDB 里 —— 清掉即重置。
+    ///
+    /// 只清当前这一个站，别的标签页和别的网站一概不碰。
+    /// </summary>
+    private static async Task<string> ResetTrial(ToolContext c)
+    {
+        var url = c.CurrentUrl();
+        if (url.Length == 0) return Lang.T("web.noPage");
+        var host = "";
+        try { host = new Uri(url).Host; } catch { }
+        if (host.Length == 0) return Lang.T("web.badUrl");
+
+        if (!c.Confirm(Lang.T("toolbox.confirmTitle"), Lang.T("web.resetTrialAsk", host))) return "";
+
+        var detail = await c.ClearSiteData();
+        if (detail.Length == 0) detail = Lang.T("web.resetTrialParts", 0, 0, 0, 0, 0);
+        c.Reload();
+        return Lang.T("web.resetTrialDone", host, detail);
+    }
+
     private static string SafeName(string s)
     {
         if (string.IsNullOrWhiteSpace(s)) return "page";
@@ -1963,11 +1994,12 @@ internal static class ToolBox
             sb.AppendLine($"  [{(ok ? "PASS" : "FAIL")}] {name}   {detail}");
         }
 
-        // 每个分类都得是 28 项，加起来 112
-        CheckTrue("四个分类各 28 项", InCategory(CatOps).Count == 28 &&
-                                     InCategory(CatWeb).Count == 28 &&
-                                     InCategory(CatText).Count == 28 &&
-                                     InCategory(CatSafe).Count == 28,
+        // 运维 / 文本 / 安全各 28 项，网页类多一项「重置免费次数」
+        CheckTrue("功能数：运维/文本/安全各 28，网页 29",
+            InCategory(CatOps).Count == 28 &&
+            InCategory(CatWeb).Count == 29 &&
+            InCategory(CatText).Count == 28 &&
+            InCategory(CatSafe).Count == 28,
             $"{InCategory(CatOps).Count}/{InCategory(CatWeb).Count}/" +
             $"{InCategory(CatText).Count}/{InCategory(CatSafe).Count}");
 
@@ -2062,6 +2094,14 @@ internal static class ToolBox
         CheckTrue("格式校验认不出乱码", !FormatCheck("???").Contains("\n"), "");
         CheckTrue("打码手机号", MaskPii("13800138000").Contains("138****8000"), MaskPii("13800138000"));
         CheckTrue("打码邮箱", MaskPii("a@b.com").Contains("***@"), MaskPii("a@b.com"));
+
+        // 「重置免费次数」：菜单入口在、类别对、文案齐，缺一样就在这红
+        var trial = Find("web.resettrial");
+        CheckTrue("重置免费次数入口存在", trial is not null, "");
+        CheckTrue("重置免费次数归在网页类", trial?.Category == CatWeb, trial?.Category ?? "");
+        CheckTrue("重置免费次数文案齐全",
+            !Lang.Missing("web.resetTrialAsk") && !Lang.Missing("web.resetTrialDone"),
+            "");
 
         sb.AppendLine();
         sb.AppendLine(new string('=', 70));

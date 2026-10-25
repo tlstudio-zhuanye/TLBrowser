@@ -196,6 +196,88 @@ internal abstract class WebTab : UserControl
     }
 
     /// <summary>
+    /// 把当前站点在这台电脑上留下的痕迹清干净，返回「清了几项」的明细。
+    /// 给「重置免费次数」这类功能用：很多网站把「还能免费用几次」记在
+    /// Cookie / localStorage / IndexedDB 里，清掉再刷新，计数就重新算了。
+    ///
+    /// 只清**当前这个站**，不动别的标签页、别的网站 —— Cookie 走 WebView2 原生接口
+    /// （JS 删不掉 HttpOnly 的），存储类走页面里的 JS，两边各干各的。
+    /// </summary>
+    public async Task<string> ClearSiteDataAsync()
+    {
+        var core = ActiveView?.CoreWebView2;
+        if (core is null) return "";
+
+        int cookies = 0;
+        try
+        {
+            var host = new Uri(core.Source).Host;
+            var list = await core.CookieManager.GetCookiesAsync(host);
+            foreach (var ck in list)
+            {
+                try { core.CookieManager.DeleteCookie(ck); cookies++; } catch { }
+            }
+        }
+        catch { }
+
+        // JS 侧：本地存储 / IndexedDB / CacheStorage / Service Worker。
+        // 每类都可能因为页面还没加载完、或站点禁用了某项而失败，所以各自 try。
+        var raw = await RunScriptAsync(ResetTrialJs);
+        int ls = 0, idb = 0, caches = 0, sw = 0;
+        if (raw.Length > 0 && raw != "null")
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(raw);
+                var r = doc.RootElement;
+                ls = r.TryGetProperty("ls", out var a) ? a.GetInt32() : 0;
+                idb = r.TryGetProperty("idb", out var b) ? b.GetInt32() : 0;
+                caches = r.TryGetProperty("caches", out var c) ? c.GetInt32() : 0;
+                sw = r.TryGetProperty("sw", out var d) ? d.GetInt32() : 0;
+            }
+            catch { }
+        }
+
+        return Lang.T("web.resetTrialParts", cookies, ls, idb, caches, sw);
+    }
+
+    /// <summary>
+    /// 清本地存储那几样的页面脚本。计数能拿多少算多少 —— 拿不到的部分由
+    /// 原生 Cookie 接口兜着，所以整体不缺东西。返回 JSON：{ls,idb,caches,sw}。
+    /// 整个是 async IIFE，WebView2 的 ExecuteScriptAsync 会等 Promise 落地再返回。
+    /// </summary>
+    private const string ResetTrialJs =
+        "(async function(){" +
+        "var o={ls:0,idb:0,caches:0,sw:0};" +
+        "try{o.ls=localStorage.length+sessionStorage.length;" +
+        "localStorage.clear();sessionStorage.clear();}catch(e){}" +
+        "try{" +
+        "  if(indexedDB.databases){" +
+        "    var d=await indexedDB.databases();" +
+        "    o.idb=d.length;" +
+        "    for(var i=0;i<d.length;i++){try{indexedDB.deleteDatabase(d[i].name)}catch(e){}}" +
+        "  }else{o.idb=-1}" +
+        "}catch(e){o.idb=-1}" +
+        "try{" +
+        "  if(window.caches&&caches.keys){" +
+        "    var k=await caches.keys();" +
+        "    o.caches=k.length;" +
+        "    for(var j=0;j<k.length;j++){try{await caches.delete(k[j])}catch(e){}}" +
+        "  }else{o.caches=-1}" +
+        "}catch(e){o.caches=-1}" +
+        "try{" +
+        "  if(navigator.serviceWorker&&navigator.serviceWorker.getRegistrations){" +
+        "    var r=await navigator.serviceWorker.getRegistrations();" +
+        "    o.sw=r.length;" +
+        "    for(var m=0;m<r.length;m++){try{await r[m].unregister()}catch(e){}}" +
+        "  }else if(navigator.serviceWorker){" +
+        "    var one=await navigator.serviceWorker.getRegistration();" +
+        "    o.sw=one?1:0;if(one){try{await one.unregister()}catch(e){}}" +
+        "  }else{o.sw=-1}" +
+        "}catch(e){o.sw=-1}" +
+        "return JSON.stringify(o)})()";
+
+    /// <summary>
     /// 把画面截成 PNG 字节。fullPage=true 时按文档实际高度先改视口再截，
     /// 截完把滚动位置和视口尺寸都还原回去，不给用户留下一个被弄乱了的页面。
     /// </summary>
